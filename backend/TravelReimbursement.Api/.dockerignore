@@ -1,0 +1,4 @@
+bin/
+obj/
+private-uploads/
+appsettings.Development.json

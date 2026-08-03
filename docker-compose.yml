@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-travel_reimbursement}
+      POSTGRES_USER: ${POSTGRES_USER:-travel_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ./backend/TravelReimbursement.Api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-travel_reimbursement};Username=${POSTGRES_USER:-travel_app};Password=${POSTGRES_PASSWORD}
+      Jwt__Issuer: TravelReimbursement
+      Jwt__Audience: TravelReimbursement.Web
+      Jwt__Key: ${JWT_KEY:?Set JWT_KEY in .env}
+      BootstrapAdmin__PhoneNumber: ${BOOTSTRAP_ADMIN_PHONE_NUMBER:?Set BOOTSTRAP_ADMIN_PHONE_NUMBER in .env}
+      BootstrapAdmin__DisplayName: ${BOOTSTRAP_ADMIN_DISPLAY_NAME:-系统管理员}
+      BootstrapAdmin__Password: ${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD in .env}
+      FileStorage__LocalPath: /data/private-uploads
+      FileStorage__StagedRetentionHours: 24
+    volumes:
+      - attachments_data:/data/private-uploads
+    ports:
+      - "8080:8080"
+
+  web:
+    build:
+      context: ./frontend
+    depends_on:
+      - api
+    ports:
+      - "8088:80"
+
+volumes:
+  postgres_data:
+  attachments_data:

@@ -1,0 +1,12 @@
+bin/
+obj/
+node_modules/
+.npm-cache/
+.tools/
+.run/
+.tmp/
+*.log
+private-uploads/
+.env
+.env.*
+!.env.example
