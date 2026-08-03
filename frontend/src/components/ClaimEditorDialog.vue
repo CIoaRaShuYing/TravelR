@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { ElMessage, type UploadFile } from 'element-plus'
 import { Delete, Download, Plus, Upload, View } from '@element-plus/icons-vue'
 import {
@@ -58,8 +58,20 @@ const categoryOptions: ExpenseCategory[] = ['DepartureTransport', 'ReturnTranspo
 const totalAmount = computed(() => form.expenseItems.reduce((sum, item) => sum + Number(item.amount ?? 0), 0))
 const title = computed(() => currentClaim.value ? `编辑报销 · ${currentClaim.value.claimNumber}` : '新增报销')
 
+function newClientKey() {
+  const secureUuid = globalThis.crypto?.randomUUID?.()
+  if (secureUuid) return secureUuid
+
+  const bytes = new Uint8Array(16)
+  for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256)
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 function newExpenseItem(category: '' | ExpenseCategory = ''): EditorExpenseItem {
-  return { clientKey: crypto.randomUUID(), category, amount: undefined, expenseDate: '', merchant: '', note: '', attachments: [], uploading: false }
+  return { clientKey: newClientKey(), category, amount: undefined, expenseDate: '', merchant: '', note: '', attachments: [], uploading: false }
 }
 
 function defaultExpenseItems(type: ClaimType) {
@@ -271,11 +283,11 @@ async function submit() {
   }
 }
 
-watch(() => props.modelValue, open => { if (open) initialize() })
+function handleDialogOpen() { initialize() }
 </script>
 
 <template>
-  <el-dialog v-model="dialogOpen" :title="title" width="min(980px, calc(100vw - 32px))" :close-on-click-modal="false" class="claim-editor-dialog">
+  <el-dialog v-model="dialogOpen" :title="title" width="min(980px, calc(100vw - 32px))" :close-on-click-modal="false" class="claim-editor-dialog" @open="handleDialogOpen">
     <div v-loading="loading" class="claim-editor">
       <div v-if="currentClaim" class="version-notice">
         <strong>当前 v{{ currentClaim.currentVersion.versionNumber }} · {{ typeLabels[currentClaim.type] }}</strong>
