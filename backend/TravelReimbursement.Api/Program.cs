@@ -369,6 +369,103 @@ admin.MapPost("/registration-requests/{id:guid}/reject", async (Guid id, ReviewR
     return Results.Ok(new { message = "已拒绝注册申请。" });
 });
 
+admin.MapGet("/users", async (bool? isActive, string? keyword, int? page, int? pageSize, AppDbContext db) =>
+{
+    var paging = NormalizePaging(page, pageSize);
+    var formalUserIds = db.UserRoles
+        .Join(db.Roles, userRole => userRole.RoleId, role => role.Id, (userRole, role) => new { userRole.UserId, role.Name })
+        .Where(x => x.Name == "Applicant" || x.Name == "Administrator")
+        .Select(x => x.UserId)
+        .Distinct();
+    var query = db.Users.AsNoTracking().Where(user => formalUserIds.Contains(user.Id));
+    if (isActive.HasValue) query = query.Where(user => user.IsActive == isActive.Value);
+    if (!string.IsNullOrWhiteSpace(keyword))
+    {
+        var term = keyword.Trim();
+        query = query.Where(user => user.DisplayName.Contains(term) || (user.PhoneNumber != null && user.PhoneNumber.Contains(term)));
+    }
+
+    var total = await query.CountAsync();
+    var users = await query.OrderBy(user => user.DisplayName).ThenBy(user => user.PhoneNumber)
+        .Skip((paging.Page - 1) * paging.PageSize).Take(paging.PageSize)
+        .Select(user => new { user.Id, user.DisplayName, PhoneNumber = user.PhoneNumber ?? string.Empty, user.IsActive })
+        .ToListAsync();
+    var userIds = users.Select(user => user.Id).ToList();
+    var roleRows = await db.UserRoles.AsNoTracking()
+        .Where(userRole => userIds.Contains(userRole.UserId))
+        .Join(db.Roles.AsNoTracking(), userRole => userRole.RoleId, role => role.Id, (userRole, role) => new { userRole.UserId, role.Name })
+        .Where(x => x.Name != null)
+        .ToListAsync();
+    var rolesByUserId = roleRows.GroupBy(x => x.UserId)
+        .ToDictionary(group => group.Key, group => group.Select(x => x.Name!).OrderBy(x => x).ToArray());
+    var items = users.Select(user => new
+    {
+        user.Id,
+        user.DisplayName,
+        user.PhoneNumber,
+        user.IsActive,
+        roles = rolesByUserId.GetValueOrDefault(user.Id, [])
+    }).Cast<object>().ToList();
+    return Results.Ok(new PagedResult<object>(items, paging.Page, paging.PageSize, total));
+});
+
+admin.MapGet("/applicants", async (string? keyword, int? page, int? pageSize, AppDbContext db) =>
+{
+    var paging = NormalizePaging(page, pageSize);
+    var applicantRoleIds = db.Roles.Where(role => role.Name == "Applicant").Select(role => role.Id);
+    var query = db.Users.AsNoTracking().Where(user => user.IsActive && user.PhoneNumber != null
+        && db.UserRoles.Any(userRole => userRole.UserId == user.Id && applicantRoleIds.Contains(userRole.RoleId)));
+    if (!string.IsNullOrWhiteSpace(keyword))
+    {
+        var term = keyword.Trim();
+        query = query.Where(user => user.DisplayName.Contains(term) || (user.PhoneNumber != null && user.PhoneNumber.Contains(term)));
+    }
+
+    var total = await query.CountAsync();
+    var items = await query.OrderBy(user => user.DisplayName).ThenBy(user => user.PhoneNumber)
+        .Skip((paging.Page - 1) * paging.PageSize).Take(paging.PageSize)
+        .Select(user => new { user.Id, user.DisplayName, PhoneNumber = user.PhoneNumber! })
+        .ToListAsync();
+    return Results.Ok(new PagedResult<object>(items.Cast<object>().ToList(), paging.Page, paging.PageSize, total));
+});
+
+admin.MapPost("/users/{id:guid}/{action:regex(^enable|disable$)}", async (Guid id, string action, AppDbContext db, ClaimsPrincipal principal, HttpContext context) =>
+{
+    var user = await db.Users.SingleOrDefaultAsync(item => item.Id == id);
+    if (user is null) return Results.NotFound();
+    var roleNames = await db.UserRoles.Where(userRole => userRole.UserId == id)
+        .Join(db.Roles, userRole => userRole.RoleId, role => role.Id, (userRole, role) => role.Name)
+        .Where(roleName => roleName != null)
+        .Select(roleName => roleName!)
+        .ToListAsync();
+    if (!roleNames.Any(roleName => roleName is "Applicant" or "Administrator")) return Results.NotFound();
+
+    var enable = action == "enable";
+    if (!enable)
+    {
+        if (id == GetUserId(principal))
+            return Results.Conflict(new { code = "USER_SELF_DISABLE", message = "不能停用当前登录账户。" });
+
+        var isAdministrator = roleNames.Contains("Administrator");
+        if (isAdministrator)
+        {
+            var activeAdministratorCount = await db.Users.Where(item => item.IsActive)
+                .Join(db.UserRoles, item => item.Id, userRole => userRole.UserId, (item, userRole) => userRole.RoleId)
+                .Join(db.Roles, roleId => roleId, role => role.Id, (roleId, role) => role.Name)
+                .CountAsync(roleName => roleName == "Administrator");
+            if (activeAdministratorCount <= 1)
+                return Results.Conflict(new { code = "LAST_ADMIN_DISABLE", message = "不能停用最后一个启用的管理员账户。" });
+        }
+    }
+
+    if (user.IsActive == enable) return Results.Ok(new { user.Id, user.IsActive });
+    user.IsActive = enable;
+    var actorId = GetUserId(principal);
+    await AuditAsync(db, actorId, enable ? "UserEnabled" : "UserDisabled", "User", id.ToString(), context.TraceIdentifier);
+    await db.SaveChangesAsync();
+    return Results.Ok(new { user.Id, user.IsActive });
+});
+
 admin.MapGet("/projects", async (bool? isActive, string? keyword, int? page, int? pageSize, AppDbContext db) =>
 {
     var paging = NormalizePaging(page, pageSize);

@@ -35,6 +35,20 @@ export type RegistrationRequest = {
   concurrencyToken: string
 }
 
+export type AdminUser = {
+  id: string
+  displayName: string
+  phoneNumber: string
+  isActive: boolean
+  roles: string[]
+}
+
+export type ApplicantOption = {
+  id: string
+  displayName: string
+  phoneNumber: string
+}
+
 export type ClaimListRow = {
   id: string
   claimNumber: string
@@ -252,6 +266,9 @@ export const api = {
   listRegistrationRequests: (filters: { status?: RegistrationRequestStatus; page?: number; pageSize?: number }) => request<PagedResult<RegistrationRequest>>(`/admin/registration-requests${queryString(filters)}`),
   approveRegistration: (id: string, body: { concurrencyToken: string }) => request<{ message: string }>(`/admin/registration-requests/${id}/approve`, { method: 'POST', body: JSON.stringify(body) }),
   rejectRegistration: (id: string, body: { concurrencyToken: string }) => request<{ message: string }>(`/admin/registration-requests/${id}/reject`, { method: 'POST', body: JSON.stringify(body) }),
+  listUsers: (filters: { isActive?: boolean; keyword?: string; page?: number; pageSize?: number }) => request<PagedResult<AdminUser>>(`/admin/users${queryString(filters)}`),
+  setUserActive: (id: string, active: boolean) => request<{ id: string; isActive: boolean }>(`/admin/users/${id}/${active ? 'enable' : 'disable'}`, { method: 'POST', body: '{}' }),
+  listApplicants: (filters: { keyword?: string; page?: number; pageSize?: number }) => request<PagedResult<ApplicantOption>>(`/admin/applicants${queryString(filters)}`),
   listProjects: (filters: { isActive?: boolean; keyword?: string; page?: number; pageSize?: number }) => request<PagedResult<Project>>(`/admin/projects${queryString(filters)}`),
   createProject: (body: { code: string; name: string; description?: string }) => request<Project>('/admin/projects', { method: 'POST', body: JSON.stringify(body) }),
   updateProject: (id: string, body: { name: string; description?: string; concurrencyToken: string }) => request<Project>(`/admin/projects/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
@@ -263,6 +280,8 @@ export const api = {
   message(error: unknown, fallback: string) {
     const data = error as ApiProblem
     if (data.code === 'CLAIM_VERSION_STALE') return '数据已发生变化，请刷新后重试。'
+    if (data.code === 'USER_SELF_DISABLE') return '不能停用当前登录账户。'
+    if (data.code === 'LAST_ADMIN_DISABLE') return '不能停用最后一个启用的管理员账户。'
     return data.message ?? (Object.values(data.errors ?? {}).flat().join('；') || fallback)
   },
 }

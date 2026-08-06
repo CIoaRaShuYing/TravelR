@@ -103,6 +103,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 .pagination { justify-content: flex-end; margin-top: 18px; }
 .mobile-list { display: none; }
 .page-actions { display: flex; align-items: center; gap: 10px; }
+.user-role-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.mobile-user-roles { margin-top: 14px; }
 
 /* Claim editor */
 .claim-editor-dialog.el-dialog { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); margin-top: 16px !important; margin-bottom: 16px; overflow: hidden; }

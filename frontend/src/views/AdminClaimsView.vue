@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Check, Coin, Refresh, View } from '@element-plus/icons-vue'
-import { api, type ClaimListRow, type ClaimStatus, type PayoutStatus, type Project } from '../api'
+import { api, type ApplicantOption, type ClaimListRow, type ClaimStatus, type PayoutStatus, type Project } from '../api'
 import ClaimDetailDrawer from '../components/ClaimDetailDrawer.vue'
 
 type WorkView = 'approval' | 'payout' | 'all'
@@ -11,9 +11,10 @@ type GroupRow = { key: string; label: string; claimCount: number; totalAmount: n
 
 const activeView = ref<WorkView>('approval')
 const loading = ref(false)
+const applicantLoading = ref(false)
 const rows = ref<ClaimListRow[]>([])
 const projects = ref<Project[]>([])
-const applicants = ref<GroupRow[]>([])
+const applicants = ref<ApplicantOption[]>([])
 const groups = ref<GroupRow[]>([])
 const groupBy = ref<GroupBy>('project')
 const total = ref(0)
@@ -59,12 +60,25 @@ async function loadOptions() {
   try {
     const [projectResult, applicantResult] = await Promise.all([
       api.listProjects({ page: 1, pageSize: 100 }),
-      api.getClaimGroupSummary({ groupBy: 'applicant' }),
+      api.listApplicants({ page: 1, pageSize: 100 }),
     ])
     projects.value = projectResult.items
-    applicants.value = applicantResult
+    applicants.value = applicantResult.items
   } catch (error) {
     ElMessage.error(api.message(error, '加载筛选项失败。'))
+  }
+}
+
+async function loadApplicants(keyword = '') {
+  applicantLoading.value = true
+  try {
+    const result = await api.listApplicants({ keyword: keyword.trim() || undefined, page: 1, pageSize: 100 })
+    const selected = applicants.value.find(item => item.id === filters.applicantId)
+    applicants.value = selected && !result.items.some(item => item.id === selected.id) ? [selected, ...result.items] : result.items
+  } catch (error) {
+    ElMessage.error(api.message(error, '加载申请人目录失败。'))
+  } finally {
+    applicantLoading.value = false
   }
 }
 
@@ -157,7 +171,7 @@ onMounted(async () => { await loadOptions(); await load() })
 
     <div class="admin-claim-filters">
       <el-select v-model="filters.projectId" clearable filterable placeholder="全部项目" @change="applyFilters"><el-option v-for="project in projects" :key="project.id" :label="`${project.code} · ${project.name}`" :value="project.id" /></el-select>
-      <el-select v-model="filters.applicantId" clearable filterable placeholder="全部申请人" @change="applyFilters"><el-option v-for="applicant in applicants" :key="applicant.key" :label="applicant.label" :value="applicant.key" /></el-select>
+      <el-select v-model="filters.applicantId" clearable filterable remote reserve-keyword :remote-method="loadApplicants" :loading="applicantLoading" placeholder="全部申请人" @change="applyFilters"><el-option v-for="applicant in applicants" :key="applicant.id" :label="`${applicant.displayName} · ${applicant.phoneNumber}`" :value="applicant.id" /></el-select>
       <el-select v-if="activeView === 'all'" v-model="filters.status" clearable placeholder="全部报销状态" @change="applyFilters"><el-option v-for="status in claimStatuses" :key="status" :label="claimStatusLabel(status)" :value="status" /></el-select>
       <el-select v-if="activeView === 'all'" v-model="filters.payoutStatus" clearable placeholder="全部发放状态" @change="applyFilters"><el-option v-for="status in payoutStatuses" :key="status" :label="payoutStatusLabel(status)" :value="status" /></el-select>
       <el-date-picker v-model="filters.dates" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="创建开始" end-placeholder="创建结束" @change="applyFilters" />
