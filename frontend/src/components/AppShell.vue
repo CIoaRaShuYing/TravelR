@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { DocumentChecked, FolderOpened, Menu, Setting, SwitchButton, Tickets, User, UserFilled } from '@element-plus/icons-vue'
+import { DocumentChecked, FolderOpened, Key, Menu, Setting, SwitchButton, Tickets, User, UserFilled } from '@element-plus/icons-vue'
 import { clearSession, isAdministrator, session } from '../session'
 
 const route = useRoute()
@@ -10,6 +10,7 @@ const drawerOpen = ref(false)
 
 const navItems = computed(() => [
   { path: '/claims', label: '我的报销', icon: Tickets, visible: true },
+  { path: '/account/security', label: '账号安全', icon: Key, visible: true },
   { path: '/admin/users', label: '用户中心', icon: UserFilled, visible: isAdministrator.value },
   { path: '/admin/registrations', label: '注册审批', icon: User, visible: isAdministrator.value },
   { path: '/admin/projects', label: '项目管理', icon: FolderOpened, visible: isAdministrator.value },

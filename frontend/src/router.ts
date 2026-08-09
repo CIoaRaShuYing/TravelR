@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MyClaimsView from './views/MyClaimsView.vue'
+import AccountSecurityView from './views/AccountSecurityView.vue'
 import AdminRegistrationsView from './views/AdminRegistrationsView.vue'
 import AdminUsersView from './views/AdminUsersView.vue'
 import AdminProjectsView from './views/AdminProjectsView.vue'
@@ -12,6 +13,7 @@ export const router = createRouter({
   routes: [
     { path: '/', redirect: '/claims' },
     { path: '/claims', component: MyClaimsView, meta: { title: '我的报销' } },
+    { path: '/account/security', component: AccountSecurityView, meta: { title: '账号安全' } },
     { path: '/admin/users', component: AdminUsersView, meta: { title: '用户中心', administrator: true } },
     { path: '/admin/registrations', component: AdminRegistrationsView, meta: { title: '注册审批', administrator: true } },
     { path: '/admin/projects', component: AdminProjectsView, meta: { title: '项目管理', administrator: true } },

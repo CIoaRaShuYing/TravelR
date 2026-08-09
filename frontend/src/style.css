@@ -327,3 +327,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }
+
+.user-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px; }
+.dialog-note { margin: 0 0 18px; color: var(--muted); font-size: 13px; line-height: 1.7; }

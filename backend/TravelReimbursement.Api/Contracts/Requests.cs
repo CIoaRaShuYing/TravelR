@@ -12,6 +12,13 @@ public sealed record LoginRequest(
     [property: Required, RegularExpression("^1[3-9]\\d{9}$")] string PhoneNumber,
     [property: Required] string Password);
 
+public sealed record ChangePasswordRequest(
+    [property: Required] string CurrentPassword,
+    [property: Required, StringLength(100, MinimumLength = 8)] string NewPassword);
+
+public sealed record ResetPasswordRequest(
+    [property: Required, StringLength(100, MinimumLength = 8)] string NewPassword);
+
 public sealed record UpdateRegistrationModeRequest(RegistrationMode RegistrationMode);
 public sealed record ReviewRegistrationRequest(Guid ConcurrencyToken);
 

@@ -38,7 +38,8 @@ builder.Services
     })
     .AddRoles<IdentityRole<Guid>>()
     .AddEntityFrameworkStores<AppDbContext>()
-    .AddSignInManager();
+    .AddSignInManager()
+    .AddDefaultTokenProviders();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -60,7 +61,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var userId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
                 var userManager = context.HttpContext.RequestServices.GetRequiredService<UserManager<AppUser>>();
                 var user = Guid.TryParse(userId, out var parsedId) ? await userManager.FindByIdAsync(parsedId.ToString()) : null;
-                if (user is null || !user.IsActive) context.Fail("用户不存在或已停用。");
+                var tokenSecurityStamp = context.Principal?.FindFirstValue(SecurityConstants.SecurityStampClaimType);
+                if (user is null || !user.IsActive || string.IsNullOrWhiteSpace(tokenSecurityStamp) || !string.Equals(tokenSecurityStamp, user.SecurityStamp, StringComparison.Ordinal))
+                    context.Fail("用户不存在、已停用或登录状态已失效。");
             }
         };
     });
@@ -189,6 +192,24 @@ secured.MapGet("/me", async (ClaimsPrincipal principal, UserManager<AppUser> use
     var user = await userManager.GetUserAsync(principal);
     if (user is null) return Results.Unauthorized();
     return Results.Ok(new { user.Id, user.DisplayName, user.PhoneNumber, roles = await userManager.GetRolesAsync(user) });
+});
+
+secured.MapPut("/me/password", async (ChangePasswordRequest request, UserManager<AppUser> userManager, AppDbContext db, ClaimsPrincipal principal, HttpContext context) =>
+{
+    var user = await userManager.GetUserAsync(principal);
+    if (user is null) return Results.Unauthorized();
+    if (!await userManager.CheckPasswordAsync(user, request.CurrentPassword))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["currentPassword"] = ["原密码不正确。"] }, statusCode: StatusCodes.Status400BadRequest, title: "PASSWORD_INCORRECT");
+    if (await userManager.CheckPasswordAsync(user, request.NewPassword))
+        return Results.Conflict(new { code = "PASSWORD_UNCHANGED", message = "新密码不能与原密码相同。" });
+
+    await using var transaction = await db.Database.BeginTransactionAsync();
+    var changed = await userManager.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
+    if (!changed.Succeeded) return Results.ValidationProblem(ToErrors(changed.Errors));
+    await AuditAsync(db, user.Id, "PasswordChanged", "User", user.Id.ToString(), context.TraceIdentifier);
+    await db.SaveChangesAsync();
+    await transaction.CommitAsync();
+    return Results.Ok(new { message = "密码修改成功，请重新登录。" });
 });
 
 secured.MapGet("/projects/available", async (AppDbContext db) => Results.Ok(await db.Projects.AsNoTracking()
@@ -367,6 +388,56 @@ admin.MapPost("/registration-requests/{id:guid}/reject", async (Guid id, ReviewR
     await AuditAsync(db, pending.ReviewedById, "RegistrationRejected", "RegistrationRequest", id.ToString(), context.TraceIdentifier);
     await db.SaveChangesAsync();
     return Results.Ok(new { message = "已拒绝注册申请。" });
+});
+
+admin.MapPost("/users/{id:guid}/administrator/{action:regex(^grant|revoke$)}", async (Guid id, string action, AppDbContext db, UserManager<AppUser> userManager, ClaimsPrincipal principal, HttpContext context) =>
+{
+    var user = await db.Users.SingleOrDefaultAsync(item => item.Id == id);
+    if (user is null) return Results.NotFound();
+    var roles = await userManager.GetRolesAsync(user);
+    if (!roles.Any(role => role is "Applicant" or "Administrator")) return Results.NotFound();
+
+    var grant = action == "grant";
+    if (grant && !user.IsActive)
+        return Results.Conflict(new { code = "USER_INACTIVE_ROLE_CHANGE", message = "停用用户不能设为管理员。" });
+    if (!grant && id == GetUserId(principal))
+        return Results.Conflict(new { code = "USER_SELF_ADMIN_REVOKE", message = "不能取消当前登录账户的管理员角色。" });
+    if (!grant && user.PhoneNumber == SecurityConstants.SuperAdministratorPhoneNumber)
+        return Results.Conflict(new { code = "SUPER_ADMIN_ROLE_REQUIRED", message = "超级管理员账号不能取消管理员角色。" });
+
+    if (grant && roles.Contains("Administrator") || !grant && !roles.Contains("Administrator"))
+        return Results.Ok(new { user.Id, roles });
+    await using var transaction = await db.Database.BeginTransactionAsync();
+    var result = grant
+        ? await userManager.AddToRoleAsync(user, "Administrator")
+        : await userManager.RemoveFromRoleAsync(user, "Administrator");
+    if (!result.Succeeded) return Results.ValidationProblem(ToErrors(result.Errors));
+
+    var stampUpdate = await userManager.UpdateSecurityStampAsync(user);
+    if (!stampUpdate.Succeeded) return Results.ValidationProblem(ToErrors(stampUpdate.Errors));
+    await AuditAsync(db, GetUserId(principal), grant ? "AdministratorGranted" : "AdministratorRevoked", "User", id.ToString(), context.TraceIdentifier);
+    await db.SaveChangesAsync();
+    await transaction.CommitAsync();
+    return Results.Ok(new { user.Id, roles = await userManager.GetRolesAsync(user) });
+});
+
+admin.MapPut("/users/{id:guid}/password", async (Guid id, ResetPasswordRequest request, AppDbContext db, UserManager<AppUser> userManager, ClaimsPrincipal principal, HttpContext context) =>
+{
+    if (id == GetUserId(principal))
+        return Results.Conflict(new { code = "USER_SELF_PASSWORD_RESET", message = "请使用账号安全页面修改自己的密码。" });
+    var user = await db.Users.SingleOrDefaultAsync(item => item.Id == id);
+    if (user is null) return Results.NotFound();
+    var roles = await userManager.GetRolesAsync(user);
+    if (!roles.Any(role => role is "Applicant" or "Administrator")) return Results.NotFound();
+
+    await using var transaction = await db.Database.BeginTransactionAsync();
+    var token = await userManager.GeneratePasswordResetTokenAsync(user);
+    var reset = await userManager.ResetPasswordAsync(user, token, request.NewPassword);
+    if (!reset.Succeeded) return Results.ValidationProblem(ToErrors(reset.Errors));
+    await AuditAsync(db, GetUserId(principal), "PasswordResetByAdministrator", "User", id.ToString(), context.TraceIdentifier);
+    await db.SaveChangesAsync();
+    await transaction.CommitAsync();
+    return Results.Ok(new { user.Id, message = "密码重置成功，目标用户需要使用新密码重新登录。" });
 });
 
 admin.MapGet("/users", async (bool? isActive, string? keyword, int? page, int? pageSize, AppDbContext db) =>
@@ -702,7 +773,8 @@ static string CreateToken(AppUser user, IList<string> roles, IConfiguration conf
         new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
         new(ClaimTypes.NameIdentifier, user.Id.ToString()),
         new(ClaimTypes.Name, user.DisplayName),
-        new(ClaimTypes.MobilePhone, user.PhoneNumber!)
+        new(ClaimTypes.MobilePhone, user.PhoneNumber!),
+        new(SecurityConstants.SecurityStampClaimType, user.SecurityStamp ?? string.Empty)
     };
     claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
     var token = new JwtSecurityToken(configuration["Jwt:Issuer"], configuration["Jwt:Audience"], claims, expires: DateTime.UtcNow.AddHours(8), signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
@@ -741,3 +813,10 @@ public sealed record ClaimListRow(
     DateTimeOffset UpdatedAt);
 
 public partial class Program;
+
+
+static class SecurityConstants
+{
+    public const string SuperAdministratorPhoneNumber = "13730614340";
+    public const string SecurityStampClaimType = "security_stamp";
+}

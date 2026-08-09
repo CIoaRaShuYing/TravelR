@@ -261,6 +261,7 @@ export const api = {
       fileName: encodedName ? decodeURIComponent(encodedName) : quotedName ?? 'attachment',
     }
   },
+  changePassword: (body: { currentPassword: string; newPassword: string }) => request<{ message: string }>('/me/password', { method: 'PUT', body: JSON.stringify(body) }),
   getAdminSettings: () => request<{ registrationMode: RegistrationMode; updatedAt: string }>('/admin/registration-settings'),
   updateAdminSettings: (registrationMode: RegistrationMode) => request<{ registrationMode: RegistrationMode; updatedAt: string }>('/admin/registration-settings', { method: 'PUT', body: JSON.stringify({ registrationMode }) }),
   listRegistrationRequests: (filters: { status?: RegistrationRequestStatus; page?: number; pageSize?: number }) => request<PagedResult<RegistrationRequest>>(`/admin/registration-requests${queryString(filters)}`),
@@ -268,6 +269,8 @@ export const api = {
   rejectRegistration: (id: string, body: { concurrencyToken: string }) => request<{ message: string }>(`/admin/registration-requests/${id}/reject`, { method: 'POST', body: JSON.stringify(body) }),
   listUsers: (filters: { isActive?: boolean; keyword?: string; page?: number; pageSize?: number }) => request<PagedResult<AdminUser>>(`/admin/users${queryString(filters)}`),
   setUserActive: (id: string, active: boolean) => request<{ id: string; isActive: boolean }>(`/admin/users/${id}/${active ? 'enable' : 'disable'}`, { method: 'POST', body: '{}' }),
+  setUserAdministrator: (id: string, administrator: boolean) => request<{ id: string; roles: string[] }>(`/admin/users/${id}/administrator/${administrator ? 'grant' : 'revoke'}`, { method: 'POST', body: '{}' }),
+  resetUserPassword: (id: string, newPassword: string) => request<{ id: string; message: string }>(`/admin/users/${id}/password`, { method: 'PUT', body: JSON.stringify({ newPassword }) }),
   listApplicants: (filters: { keyword?: string; page?: number; pageSize?: number }) => request<PagedResult<ApplicantOption>>(`/admin/applicants${queryString(filters)}`),
   listProjects: (filters: { isActive?: boolean; keyword?: string; page?: number; pageSize?: number }) => request<PagedResult<Project>>(`/admin/projects${queryString(filters)}`),
   createProject: (body: { code: string; name: string; description?: string }) => request<Project>('/admin/projects', { method: 'POST', body: JSON.stringify(body) }),
@@ -282,6 +285,12 @@ export const api = {
     if (data.code === 'CLAIM_VERSION_STALE') return '数据已发生变化，请刷新后重试。'
     if (data.code === 'USER_SELF_DISABLE') return '不能停用当前登录账户。'
     if (data.code === 'LAST_ADMIN_DISABLE') return '不能停用最后一个启用的管理员账户。'
+    if (data.code === 'PASSWORD_INCORRECT') return '原密码不正确。'
+    if (data.code === 'PASSWORD_UNCHANGED') return '新密码不能与原密码相同。'
+    if (data.code === 'USER_INACTIVE_ROLE_CHANGE') return '停用用户不能设为管理员。'
+    if (data.code === 'USER_SELF_ADMIN_REVOKE') return '不能取消当前登录账户的管理员角色。'
+    if (data.code === 'SUPER_ADMIN_ROLE_REQUIRED') return '超级管理员账号不能取消管理员角色。'
+    if (data.code === 'USER_SELF_PASSWORD_RESET') return '请使用账号安全页面修改自己的密码。'
     return data.message ?? (Object.values(data.errors ?? {}).flat().join('；') || fallback)
   },
 }
