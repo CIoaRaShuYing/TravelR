@@ -9,6 +9,7 @@ public enum RegistrationRequestStatus { Pending, Approved, Rejected }
 public enum ClaimType { Travel, General }
 public enum ClaimStatus { Draft, Submitted, Approved, Rejected, Cancelled }
 public enum PayoutStatus { NotApplicable, Pending, Paid }
+public enum MealAllowanceStatus { Draft, PendingTravelReview, PendingReview, Approved, Rejected, Cancelled }
 public enum ExpenseCategory { DepartureTransport, ReturnTransport, Lodging, OfficeSupplies, Meal, Other, Unspecified }
 public enum AttachmentScanStatus { Pending, Accepted, Rejected }
 public enum AttachmentBindingStatus { Staged, Bound }
@@ -16,6 +17,8 @@ public enum AttachmentBindingStatus { Staged, Bound }
 public sealed class AppUser : IdentityUser<Guid>
 {
     public string DisplayName { get; set; } = string.Empty;
+    public string? PersonalName { get; set; }
+    public string? BankCardProtected { get; set; }
     public bool IsActive { get; set; } = true;
 }
 
@@ -99,8 +102,64 @@ public sealed class ClaimVersion
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? SupersededAt { get; set; }
     public TravelItinerary? TravelItinerary { get; set; }
+    public MealAllowance? MealAllowance { get; set; }
     public List<ExpenseItem> ExpenseItems { get; set; } = [];
     public List<ApprovalRecord> ApprovalRecords { get; set; } = [];
+}
+
+public sealed class MealAllowance
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ClaimVersionId { get; set; }
+    public ClaimVersion ClaimVersion { get; set; } = null!;
+    public DateOnly? DepartureDate { get; set; }
+    public DateOnly? ReturnDate { get; set; }
+    public int Days { get; set; }
+    public decimal? DailyAmount { get; set; }
+    public decimal? TotalAmount { get; set; }
+    public MealAllowanceStatus Status { get; set; } = MealAllowanceStatus.Draft;
+    public PayoutStatus PayoutStatus { get; set; } = PayoutStatus.NotApplicable;
+    public Guid? ReviewedById { get; set; }
+    public DateTimeOffset? ReviewedAt { get; set; }
+    public string? ReviewComment { get; set; }
+    public DateTimeOffset? PaidAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    [ConcurrencyCheck]
+    public Guid ConcurrencyToken { get; set; } = Guid.NewGuid();
+    public List<MealAllowanceApprovalRecord> ApprovalRecords { get; set; } = [];
+    public MealAllowancePayoutRecord? PayoutRecord { get; set; }
+}
+
+public sealed class MealAllowanceApprovalRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid MealAllowanceId { get; set; }
+    public MealAllowance MealAllowance { get; set; } = null!;
+    public MealAllowanceStatus FromStatus { get; set; }
+    public MealAllowanceStatus ToStatus { get; set; }
+    public decimal? DailyAmount { get; set; }
+    public decimal? TotalAmount { get; set; }
+    public Guid ActorId { get; set; }
+    [NotMapped]
+    public string? ActorDisplayName { get; set; }
+    public string? Comment { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class MealAllowancePayoutRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid MealAllowanceId { get; set; }
+    public MealAllowance MealAllowance { get; set; } = null!;
+    public decimal Amount { get; set; }
+    public string RecipientName { get; set; } = string.Empty;
+    public string BankCardLastFour { get; set; } = string.Empty;
+    public Guid ConfirmedById { get; set; }
+    [NotMapped]
+    public string? ConfirmedByDisplayName { get; set; }
+    public string? Note { get; set; }
+    public DateTimeOffset ConfirmedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class TravelItinerary
@@ -179,11 +238,32 @@ public sealed class PayoutRecord
     public Guid ApprovedVersionId { get; set; }
     public ClaimVersion ApprovedVersion { get; set; } = null!;
     public decimal Amount { get; set; }
+    public string RecipientName { get; set; } = string.Empty;
+    public string BankCardLastFour { get; set; } = string.Empty;
     public Guid ConfirmedById { get; set; }
     [NotMapped]
     public string? ConfirmedByDisplayName { get; set; }
     public string? Note { get; set; }
     public DateTimeOffset ConfirmedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class WeeklyReport
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AuthorId { get; set; }
+    public AppUser Author { get; set; } = null!;
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+    public DateOnly WeekStart { get; set; }
+    public string CompletedWork { get; set; } = string.Empty;
+    public string NextWeekPlan { get; set; } = string.Empty;
+    public string? Issues { get; set; }
+    public Guid LastEditedById { get; set; }
+    public AppUser LastEditedBy { get; set; } = null!;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    [ConcurrencyCheck]
+    public Guid ConcurrencyToken { get; set; } = Guid.NewGuid();
 }
 
 public sealed class AuditLog

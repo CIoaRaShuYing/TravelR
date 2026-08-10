@@ -16,7 +16,7 @@ public sealed class ApiProblemException(
     public Dictionary<string, string[]>? Errors { get; } = errors;
 }
 
-public sealed class ClaimWorkflowService(AppDbContext db)
+public sealed class ClaimWorkflowService(AppDbContext db, IBankCardProtector bankCardProtector)
 {
     public async Task<ReimbursementClaim> CreateAsync(
         Guid applicantId,
@@ -136,6 +136,13 @@ public sealed class ClaimWorkflowService(AppDbContext db)
         claim.Status = ClaimStatus.Submitted;
         claim.SubmittedAt = claim.UpdatedAt = DateTimeOffset.UtcNow;
         claim.ConcurrencyToken = Guid.NewGuid();
+        if (claim.CurrentVersion!.MealAllowance is not null)
+        {
+            var meal = claim.CurrentVersion.MealAllowance;
+            meal.Status = MealAllowanceStatus.PendingTravelReview;
+            meal.UpdatedAt = DateTimeOffset.UtcNow;
+            meal.ConcurrencyToken = Guid.NewGuid();
+        }
         db.ApprovalRecords.Add(new ApprovalRecord
         {
             ClaimId = claim.Id,
@@ -169,6 +176,23 @@ public sealed class ClaimWorkflowService(AppDbContext db)
         claim.PayoutStatus = PayoutStatus.NotApplicable;
         claim.CancelledAt = claim.UpdatedAt = DateTimeOffset.UtcNow;
         claim.ConcurrencyToken = Guid.NewGuid();
+        if (claim.CurrentVersion!.MealAllowance is not null)
+        {
+            var meal = claim.CurrentVersion.MealAllowance;
+            var oldMealStatus = meal.Status;
+            meal.Status = MealAllowanceStatus.Cancelled;
+            meal.PayoutStatus = PayoutStatus.NotApplicable;
+            meal.UpdatedAt = DateTimeOffset.UtcNow;
+            meal.ConcurrencyToken = Guid.NewGuid();
+            db.MealAllowanceApprovalRecords.Add(new MealAllowanceApprovalRecord
+            {
+                MealAllowanceId = meal.Id,
+                FromStatus = oldMealStatus,
+                ToStatus = MealAllowanceStatus.Cancelled,
+                ActorId = applicantId,
+                Comment = "差旅报销已作废，餐补同步作废。"
+            });
+        }
         db.ApprovalRecords.Add(new ApprovalRecord
         {
             ClaimId = claim.Id,
@@ -205,6 +229,8 @@ public sealed class ClaimWorkflowService(AppDbContext db)
         if (claim.PayoutRecord is not null)
             throw Conflict("PAYOUT_ALREADY_PAID", "该报销已经确认发放。");
 
+        var recipient = GetRecipientSnapshot(claim.Applicant);
+
         claim.PayoutStatus = PayoutStatus.Paid;
         claim.PaidAt = claim.UpdatedAt = DateTimeOffset.UtcNow;
         claim.ConcurrencyToken = Guid.NewGuid();
@@ -213,10 +239,54 @@ public sealed class ClaimWorkflowService(AppDbContext db)
             ClaimId = claim.Id,
             ApprovedVersionId = claim.CurrentVersionId!.Value,
             Amount = claim.CurrentVersion!.TotalAmount,
+            RecipientName = recipient.PersonalName,
+            BankCardLastFour = recipient.BankCardLastFour,
             ConfirmedById = administratorId,
             Note = request.Note?.Trim()
         });
         AddAudit(administratorId, "PayoutConfirmed", "ReimbursementClaim", claim.Id, traceId, new { claim.CurrentVersionId, amount = claim.CurrentVersion.TotalAmount });
+        await SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return claim;
+    }
+
+    public Task<ReimbursementClaim> ApproveMealAllowanceAsync(Guid administratorId, Guid claimId, ReviewMealAllowanceRequest request, string? traceId, CancellationToken cancellationToken)
+        => ReviewMealAllowanceAsync(administratorId, claimId, request, true, traceId, cancellationToken);
+
+    public Task<ReimbursementClaim> RejectMealAllowanceAsync(Guid administratorId, Guid claimId, ReviewMealAllowanceRequest request, string? traceId, CancellationToken cancellationToken)
+        => ReviewMealAllowanceAsync(administratorId, claimId, request, false, traceId, cancellationToken);
+
+    public async Task<ReimbursementClaim> ConfirmMealAllowancePayoutAsync(
+        Guid administratorId,
+        Guid claimId,
+        ConfirmMealAllowancePayoutRequest request,
+        string? traceId,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var claim = await LoadClaimAsync(claimId, cancellationToken) ?? throw NotFound();
+        EnsureExpectedVersion(claim, request.ExpectedCurrentVersionId, request.ClaimConcurrencyToken);
+        var meal = claim.CurrentVersion?.MealAllowance ?? throw Conflict("MEAL_ALLOWANCE_NOT_FOUND", "该报销没有餐补记录。");
+        EnsureMealExpected(meal, request.MealConcurrencyToken);
+        if (claim.Status != ClaimStatus.Approved || meal.Status != MealAllowanceStatus.Approved || meal.PayoutStatus != PayoutStatus.Pending || !meal.TotalAmount.HasValue)
+            throw Conflict("MEAL_PAYOUT_STATUS_CONFLICT", "只有已批准且待发放的餐补可以确认发放。");
+        if (meal.PayoutRecord is not null)
+            throw Conflict("MEAL_PAYOUT_ALREADY_PAID", "该餐补已经确认发放。");
+
+        var recipient = GetRecipientSnapshot(claim.Applicant);
+        meal.PayoutStatus = PayoutStatus.Paid;
+        meal.PaidAt = meal.UpdatedAt = DateTimeOffset.UtcNow;
+        meal.ConcurrencyToken = Guid.NewGuid();
+        db.MealAllowancePayoutRecords.Add(new MealAllowancePayoutRecord
+        {
+            MealAllowanceId = meal.Id,
+            Amount = meal.TotalAmount.Value,
+            RecipientName = recipient.PersonalName,
+            BankCardLastFour = recipient.BankCardLastFour,
+            ConfirmedById = administratorId,
+            Note = request.Note?.Trim()
+        });
+        AddAudit(administratorId, "MealAllowancePayoutConfirmed", "MealAllowance", meal.Id, traceId, new { meal.ClaimVersionId, amount = meal.TotalAmount });
         await SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return claim;
@@ -228,6 +298,8 @@ public sealed class ClaimWorkflowService(AppDbContext db)
             .Include(x => x.Applicant)
             .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.Project)
             .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.TravelItinerary)
+            .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.MealAllowance)!.ThenInclude(x => x!.ApprovalRecords)
+            .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.MealAllowance)!.ThenInclude(x => x!.PayoutRecord)
             .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.ExpenseItems).ThenInclude(x => x.AttachmentLinks).ThenInclude(x => x.AttachmentAsset)
             .Include(x => x.ApprovalRecords).ThenInclude(x => x.ClaimVersion)
             .Include(x => x.PayoutRecord)
@@ -237,6 +309,8 @@ public sealed class ClaimWorkflowService(AppDbContext db)
 
         var actorIds = claim.ApprovalRecords.Select(x => x.ActorId)
             .Append(claim.PayoutRecord?.ConfirmedById ?? Guid.Empty)
+            .Concat(claim.CurrentVersion?.MealAllowance?.ApprovalRecords.Select(x => x.ActorId) ?? [])
+            .Append(claim.CurrentVersion?.MealAllowance?.PayoutRecord?.ConfirmedById ?? Guid.Empty)
             .Where(x => x != Guid.Empty)
             .Distinct()
             .ToArray();
@@ -250,6 +324,63 @@ public sealed class ClaimWorkflowService(AppDbContext db)
             record.ActorDisplayName = actorNames.GetValueOrDefault(record.ActorId);
         if (claim.PayoutRecord is not null)
             claim.PayoutRecord.ConfirmedByDisplayName = actorNames.GetValueOrDefault(claim.PayoutRecord.ConfirmedById);
+        if (claim.CurrentVersion?.MealAllowance is { } meal)
+        {
+            foreach (var record in meal.ApprovalRecords)
+                record.ActorDisplayName = actorNames.GetValueOrDefault(record.ActorId);
+            if (meal.PayoutRecord is not null)
+                meal.PayoutRecord.ConfirmedByDisplayName = actorNames.GetValueOrDefault(meal.PayoutRecord.ConfirmedById);
+        }
+        return claim;
+    }
+
+    private async Task<ReimbursementClaim> ReviewMealAllowanceAsync(
+        Guid administratorId,
+        Guid claimId,
+        ReviewMealAllowanceRequest request,
+        bool approve,
+        string? traceId,
+        CancellationToken cancellationToken)
+    {
+        if (!approve && string.IsNullOrWhiteSpace(request.Comment))
+            throw Validation("comment", "驳回餐补时必须填写原因。");
+        if (approve && (!request.DailyAmount.HasValue || request.DailyAmount.Value <= 0))
+            throw Validation("dailyAmount", "每日餐补金额必须大于零。");
+        if (approve && decimal.Round(request.DailyAmount!.Value, 2, MidpointRounding.AwayFromZero) != request.DailyAmount.Value)
+            throw Validation("dailyAmount", "每日餐补金额最多保留两位小数。");
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var claim = await LoadClaimAsync(claimId, cancellationToken) ?? throw NotFound();
+        EnsureExpectedVersion(claim, request.ExpectedCurrentVersionId, request.ClaimConcurrencyToken);
+        if (claim.Status != ClaimStatus.Approved)
+            throw Conflict("TRAVEL_REVIEW_REQUIRED", "必须先批准差旅报销，才能审核餐补。");
+        var meal = claim.CurrentVersion?.MealAllowance ?? throw Conflict("MEAL_ALLOWANCE_NOT_FOUND", "该报销没有餐补记录。");
+        EnsureMealExpected(meal, request.MealConcurrencyToken);
+        if (meal.Status != MealAllowanceStatus.PendingReview)
+            throw Conflict("MEAL_ALLOWANCE_STATUS_CONFLICT", "该餐补当前不在待审核状态。");
+
+        var oldStatus = meal.Status;
+        meal.Status = approve ? MealAllowanceStatus.Approved : MealAllowanceStatus.Rejected;
+        meal.DailyAmount = approve ? decimal.Round(request.DailyAmount!.Value, 2, MidpointRounding.AwayFromZero) : null;
+        meal.TotalAmount = approve ? meal.DailyAmount * meal.Days : null;
+        meal.PayoutStatus = approve ? PayoutStatus.Pending : PayoutStatus.NotApplicable;
+        meal.ReviewedById = administratorId;
+        meal.ReviewedAt = meal.UpdatedAt = DateTimeOffset.UtcNow;
+        meal.ReviewComment = request.Comment?.Trim();
+        meal.ConcurrencyToken = Guid.NewGuid();
+        db.MealAllowanceApprovalRecords.Add(new MealAllowanceApprovalRecord
+        {
+            MealAllowanceId = meal.Id,
+            FromStatus = oldStatus,
+            ToStatus = meal.Status,
+            DailyAmount = meal.DailyAmount,
+            TotalAmount = meal.TotalAmount,
+            ActorId = administratorId,
+            Comment = meal.ReviewComment
+        });
+        AddAudit(administratorId, approve ? "MealAllowanceApproved" : "MealAllowanceRejected", "MealAllowance", meal.Id, traceId, new { meal.ClaimVersionId, meal.Days, meal.DailyAmount, meal.TotalAmount });
+        await SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return claim;
     }
 
@@ -277,6 +408,23 @@ public sealed class ClaimWorkflowService(AppDbContext db)
         claim.PayoutStatus = approve ? PayoutStatus.Pending : PayoutStatus.NotApplicable;
         claim.ReviewedAt = claim.UpdatedAt = DateTimeOffset.UtcNow;
         claim.ConcurrencyToken = Guid.NewGuid();
+        if (claim.CurrentVersion.MealAllowance is { } meal)
+        {
+            var oldMealStatus = meal.Status;
+            meal.Status = approve ? MealAllowanceStatus.PendingReview : MealAllowanceStatus.Rejected;
+            meal.PayoutStatus = PayoutStatus.NotApplicable;
+            meal.ReviewComment = approve ? null : request.Comment?.Trim();
+            meal.UpdatedAt = DateTimeOffset.UtcNow;
+            meal.ConcurrencyToken = Guid.NewGuid();
+            db.MealAllowanceApprovalRecords.Add(new MealAllowanceApprovalRecord
+            {
+                MealAllowanceId = meal.Id,
+                FromStatus = oldMealStatus,
+                ToStatus = meal.Status,
+                ActorId = administratorId,
+                Comment = approve ? "差旅报销已批准，餐补进入待审核。" : request.Comment?.Trim()
+            });
+        }
         db.ApprovalRecords.Add(new ApprovalRecord
         {
             ClaimId = claim.Id,
@@ -341,6 +489,13 @@ public sealed class ClaimWorkflowService(AppDbContext db)
                 DepartureDate = itineraryRequest.DepartureDate,
                 ReturnDate = itineraryRequest.ReturnDate
             };
+            version.MealAllowance = new MealAllowance
+            {
+                ClaimVersionId = version.Id,
+                DepartureDate = itineraryRequest.DepartureDate,
+                ReturnDate = itineraryRequest.ReturnDate,
+                Days = MealAllowanceCalculator.CalculateDays(itineraryRequest.DepartureDate, itineraryRequest.ReturnDate)
+            };
         }
 
         foreach (var itemRequest in itemRequests)
@@ -378,6 +533,22 @@ public sealed class ClaimWorkflowService(AppDbContext db)
     {
         if (claim.CurrentVersionId != expectedVersionId || claim.ConcurrencyToken != concurrencyToken)
             throw Conflict("CLAIM_VERSION_STALE", "该报销已被其他操作更新，请刷新后重试。");
+    }
+
+    private static void EnsureMealExpected(MealAllowance meal, Guid concurrencyToken)
+    {
+        if (meal.ConcurrencyToken != concurrencyToken)
+            throw Conflict("MEAL_ALLOWANCE_STALE", "餐补已被其他操作更新，请刷新后重试。");
+    }
+
+    private (string PersonalName, string BankCardLastFour) GetRecipientSnapshot(AppUser user)
+    {
+        if (string.IsNullOrWhiteSpace(user.PersonalName) || string.IsNullOrWhiteSpace(user.BankCardProtected))
+            throw Conflict("PROFILE_INCOMPLETE", "申请人尚未填写个人姓名和银行卡号，不能确认发放。");
+        var bankCardNumber = bankCardProtector.Unprotect(user.BankCardProtected);
+        if (bankCardNumber.Length < 4)
+            throw Conflict("BANK_CARD_INVALID", "申请人的银行卡信息无效，请先更新个人资料。");
+        return (user.PersonalName, bankCardNumber[^4..]);
     }
 
     private async Task SaveChangesAsync(CancellationToken cancellationToken)

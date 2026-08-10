@@ -57,6 +57,14 @@ const categoryLabels: Record<ExpenseCategory, string> = {
 const categoryOptions: ExpenseCategory[] = ['DepartureTransport', 'ReturnTransport', 'Lodging', 'OfficeSupplies', 'Meal', 'Other']
 const totalAmount = computed(() => form.expenseItems.reduce((sum, item) => sum + Number(item.amount ?? 0), 0))
 const title = computed(() => currentClaim.value ? `编辑报销 · ${currentClaim.value.claimNumber}` : '新增报销')
+const mealAllowanceDays = computed(() => {
+  if (form.type !== 'Travel' || !form.departureDate || !form.returnDate || form.returnDate < form.departureDate) return null
+  const [departureYear, departureMonth, departureDay] = form.departureDate.split('-').map(Number)
+  const [returnYear, returnMonth, returnDay] = form.returnDate.split('-').map(Number)
+  const departureUtc = Date.UTC(departureYear!, departureMonth! - 1, departureDay)
+  const returnUtc = Date.UTC(returnYear!, returnMonth! - 1, returnDay)
+  return Math.floor((returnUtc - departureUtc) / 86_400_000) + 1
+})
 
 function newClientKey() {
   const secureUuid = globalThis.crypto?.randomUUID?.()
@@ -321,6 +329,10 @@ function handleDialogOpen() { initialize() }
             <el-form-item label="目的地" required><el-input v-model="form.destination" maxlength="100" /></el-form-item>
             <el-form-item label="出发日期" required><el-date-picker v-model="form.departureDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" /></el-form-item>
             <el-form-item label="返回日期" required><el-date-picker v-model="form.returnDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" /></el-form-item>
+          </div>
+          <div class="meal-preview" :class="{ 'meal-preview--pending': mealAllowanceDays === null }">
+            <div><span>同步申请餐补</span><strong>{{ mealAllowanceDays === null ? '待确定' : `${mealAllowanceDays} 天` }}</strong></div>
+            <p>{{ mealAllowanceDays === null ? '选择有效的出发和返回日期后自动计算。' : '按行程自然日含首尾计算，当天往返计 1 天；餐补金额由管理员在差旅审批通过后另行审核。' }}</p>
           </div>
         </section>
 

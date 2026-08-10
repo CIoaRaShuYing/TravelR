@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -68,8 +69,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 builder.Services.AddAuthorization();
+builder.Services.AddDataProtection().SetApplicationName("TravelReimbursement");
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ClaimWorkflowService>();
+builder.Services.AddScoped<MonthlyClaimExportService>();
+builder.Services.AddSingleton<IBankCardProtector, BankCardProtector>();
 builder.Services.AddHostedService<StagedAttachmentCleanupService>();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .WithOrigins("http://localhost:5173")
@@ -99,6 +103,27 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
+app.Use(async (context, next) =>
+{
+    if (context.User.Identity?.IsAuthenticated == true
+        && context.Request.Path.StartsWithSegments("/api")
+        && !context.Request.Path.StartsWithSegments("/api/me"))
+    {
+        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var db = context.RequestServices.GetRequiredService<AppDbContext>();
+        var profileComplete = Guid.TryParse(userId, out var parsedId)
+            && await db.Users.AsNoTracking().AnyAsync(user => user.Id == parsedId
+                && user.PersonalName != null && user.PersonalName != string.Empty
+                && user.BankCardProtected != null && user.BankCardProtected != string.Empty);
+        if (!profileComplete)
+        {
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            await context.Response.WriteAsJsonAsync(new { code = "PROFILE_INCOMPLETE", message = "请先填写个人姓名和银行卡号，报销及餐补将使用该银行卡发放。" });
+            return;
+        }
+    }
+    await next();
+});
 app.Use(async (context, next) =>
 {
     context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
@@ -183,15 +208,41 @@ publicApi.MapPost("/auth/login", async (LoginRequest request, UserManager<AppUse
         return Results.Unauthorized();
     var roles = await userManager.GetRolesAsync(user);
     var token = CreateToken(user, roles, configuration);
-    return Results.Ok(new { token, user = new { user.Id, user.DisplayName, user.PhoneNumber }, roles });
+    var profileIncomplete = string.IsNullOrWhiteSpace(user.PersonalName) || string.IsNullOrWhiteSpace(user.BankCardProtected);
+    return Results.Ok(new { token, user = new { user.Id, user.DisplayName, user.PhoneNumber, profileIncomplete }, roles, profileIncomplete });
 });
 
 var secured = publicApi.MapGroup(string.Empty).RequireAuthorization();
-secured.MapGet("/me", async (ClaimsPrincipal principal, UserManager<AppUser> userManager) =>
+secured.MapGet("/me", async (ClaimsPrincipal principal, UserManager<AppUser> userManager, IBankCardProtector bankCardProtector) =>
 {
     var user = await userManager.GetUserAsync(principal);
     if (user is null) return Results.Unauthorized();
-    return Results.Ok(new { user.Id, user.DisplayName, user.PhoneNumber, roles = await userManager.GetRolesAsync(user) });
+    var bankCardNumber = string.IsNullOrWhiteSpace(user.BankCardProtected) ? null : bankCardProtector.Unprotect(user.BankCardProtected);
+    return Results.Ok(new { user.Id, user.DisplayName, user.PhoneNumber, user.PersonalName, bankCardNumber, profileIncomplete = string.IsNullOrWhiteSpace(user.PersonalName) || bankCardNumber is null, roles = await userManager.GetRolesAsync(user) });
+});
+
+secured.MapGet("/me/profile", async (ClaimsPrincipal principal, UserManager<AppUser> userManager, IBankCardProtector bankCardProtector) =>
+{
+    var user = await userManager.GetUserAsync(principal);
+    if (user is null) return Results.Unauthorized();
+    var bankCardNumber = string.IsNullOrWhiteSpace(user.BankCardProtected) ? null : bankCardProtector.Unprotect(user.BankCardProtected);
+    return Results.Ok(new { user.PersonalName, bankCardNumber, profileIncomplete = string.IsNullOrWhiteSpace(user.PersonalName) || bankCardNumber is null });
+});
+
+secured.MapPut("/me/profile", async (UpdateProfileRequest request, ClaimsPrincipal principal, UserManager<AppUser> userManager, IBankCardProtector bankCardProtector, AppDbContext db, HttpContext context) =>
+{
+    var user = await userManager.GetUserAsync(principal);
+    if (user is null) return Results.Unauthorized();
+    var personalName = request.PersonalName.Trim();
+    var bankCardNumber = request.BankCardNumber.Trim();
+    if (personalName.Length is < 1 or > 100 || bankCardNumber.Length is < 16 or > 19 || !bankCardNumber.All(char.IsDigit))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["profile"] = ["请填写有效的个人姓名和 16-19 位银行卡号。"] });
+
+    user.PersonalName = personalName;
+    user.BankCardProtected = bankCardProtector.Protect(bankCardNumber);
+    await AuditAsync(db, user.Id, "UserProfileUpdated", "User", user.Id.ToString(), context.TraceIdentifier, System.Text.Json.JsonSerializer.Serialize(new { bankCardLastFour = bankCardNumber[^4..] }));
+    await db.SaveChangesAsync();
+    return Results.Ok(new { user.PersonalName, bankCardNumber, profileIncomplete = false });
 });
 
 secured.MapPut("/me/password", async (ChangePasswordRequest request, UserManager<AppUser> userManager, AppDbContext db, ClaimsPrincipal principal, HttpContext context) =>
@@ -320,7 +371,89 @@ secured.MapGet("/attachments/{id:guid}/download", async (Guid id, AppDbContext d
     return Results.File(stream, asset.ContentType, asset.OriginalFileName, enableRangeProcessing: false);
 });
 
+secured.MapGet("/weekly-reports", async (Guid? projectId, DateOnly? weekFrom, DateOnly? weekTo, int? page, int? pageSize, AppDbContext db, ClaimsPrincipal principal) =>
+{
+    var paging = NormalizePaging(page, pageSize);
+    var userId = GetUserId(principal);
+    var query = db.WeeklyReports.AsNoTracking().Where(x => x.AuthorId == userId);
+    if (projectId.HasValue) query = query.Where(x => x.ProjectId == projectId.Value);
+    if (weekFrom.HasValue) query = query.Where(x => x.WeekStart >= weekFrom.Value);
+    if (weekTo.HasValue) query = query.Where(x => x.WeekStart <= weekTo.Value);
+    var total = await query.CountAsync();
+    var items = await ProjectWeeklyReports(query.OrderByDescending(x => x.WeekStart).ThenBy(x => x.Project.Name))
+        .Skip((paging.Page - 1) * paging.PageSize).Take(paging.PageSize).ToListAsync();
+    return Results.Ok(new PagedResult<WeeklyReportRow>(items, paging.Page, paging.PageSize, total));
+});
+
+secured.MapPost("/weekly-reports", async (CreateWeeklyReportRequest request, AppDbContext db, ClaimsPrincipal principal, HttpContext context) =>
+{
+    var userId = GetUserId(principal);
+    var validation = ValidateWeeklyReport(request.WeekStart, request.CompletedWork, request.NextWeekPlan);
+    if (validation is not null) return validation;
+    var project = await db.Projects.SingleOrDefaultAsync(x => x.Id == request.ProjectId && x.IsActive);
+    if (project is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["projectId"] = ["请选择有效的启用项目。"] });
+    if (await db.WeeklyReports.AnyAsync(x => x.AuthorId == userId && x.ProjectId == request.ProjectId && x.WeekStart == request.WeekStart))
+        return Results.Conflict(new { code = "WEEKLY_REPORT_DUPLICATE", message = "该项目本周周报已存在，请直接编辑已有记录。" });
+
+    var report = new WeeklyReport
+    {
+        AuthorId = userId,
+        ProjectId = request.ProjectId,
+        WeekStart = request.WeekStart,
+        CompletedWork = request.CompletedWork.Trim(),
+        NextWeekPlan = request.NextWeekPlan.Trim(),
+        Issues = TrimOrNull(request.Issues),
+        LastEditedById = userId
+    };
+    db.WeeklyReports.Add(report);
+    await AuditAsync(db, userId, "WeeklyReportCreated", "WeeklyReport", report.Id.ToString(), context.TraceIdentifier, System.Text.Json.JsonSerializer.Serialize(new { report.ProjectId, report.WeekStart }));
+    await db.SaveChangesAsync();
+    return Results.Created($"/api/weekly-reports/{report.Id}", await ProjectWeeklyReports(db.WeeklyReports.AsNoTracking().Where(x => x.Id == report.Id)).SingleAsync());
+});
+
+secured.MapPut("/weekly-reports/{id:guid}", async (Guid id, UpdateWeeklyReportRequest request, AppDbContext db, ClaimsPrincipal principal, HttpContext context) =>
+{
+    var userId = GetUserId(principal);
+    var report = await db.WeeklyReports.SingleOrDefaultAsync(x => x.Id == id);
+    if (report is null) return Results.NotFound();
+    if (report.AuthorId != userId && !principal.IsInRole("Administrator")) return Results.Forbid();
+    if (report.ConcurrencyToken != request.ConcurrencyToken)
+        return Results.Conflict(new { code = "WEEKLY_REPORT_STALE", message = "周报已被其他操作更新，请刷新后重试。" });
+    var validation = ValidateWeeklyReport(request.WeekStart, request.CompletedWork, request.NextWeekPlan);
+    if (validation is not null) return validation;
+    var project = await db.Projects.SingleOrDefaultAsync(x => x.Id == request.ProjectId);
+    if (project is null || (!project.IsActive && project.Id != report.ProjectId))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["projectId"] = ["请选择有效的启用项目。"] });
+    if (await db.WeeklyReports.AnyAsync(x => x.Id != id && x.AuthorId == report.AuthorId && x.ProjectId == request.ProjectId && x.WeekStart == request.WeekStart))
+        return Results.Conflict(new { code = "WEEKLY_REPORT_DUPLICATE", message = "该用户在所选项目和周已有周报。" });
+
+    report.ProjectId = request.ProjectId;
+    report.WeekStart = request.WeekStart;
+    report.CompletedWork = request.CompletedWork.Trim();
+    report.NextWeekPlan = request.NextWeekPlan.Trim();
+    report.Issues = TrimOrNull(request.Issues);
+    report.LastEditedById = userId;
+    report.UpdatedAt = DateTimeOffset.UtcNow;
+    report.ConcurrencyToken = Guid.NewGuid();
+    await AuditAsync(db, userId, "WeeklyReportUpdated", "WeeklyReport", report.Id.ToString(), context.TraceIdentifier, System.Text.Json.JsonSerializer.Serialize(new { report.AuthorId, report.ProjectId, report.WeekStart }));
+    await db.SaveChangesAsync();
+    return Results.Ok(await ProjectWeeklyReports(db.WeeklyReports.AsNoTracking().Where(x => x.Id == report.Id)).SingleAsync());
+});
+
 var admin = secured.MapGroup("/admin").RequireAuthorization(new AuthorizeAttribute { Roles = "Administrator" });
+admin.MapGet("/weekly-reports", async (Guid? projectId, Guid? authorId, DateOnly? weekFrom, DateOnly? weekTo, int? page, int? pageSize, AppDbContext db) =>
+{
+    var paging = NormalizePaging(page, pageSize);
+    var query = db.WeeklyReports.AsNoTracking().AsQueryable();
+    if (projectId.HasValue) query = query.Where(x => x.ProjectId == projectId.Value);
+    if (authorId.HasValue) query = query.Where(x => x.AuthorId == authorId.Value);
+    if (weekFrom.HasValue) query = query.Where(x => x.WeekStart >= weekFrom.Value);
+    if (weekTo.HasValue) query = query.Where(x => x.WeekStart <= weekTo.Value);
+    var total = await query.CountAsync();
+    var items = await ProjectWeeklyReports(query.OrderByDescending(x => x.WeekStart).ThenBy(x => x.Project.Name).ThenBy(x => x.Author.DisplayName))
+        .Skip((paging.Page - 1) * paging.PageSize).Take(paging.PageSize).ToListAsync();
+    return Results.Ok(new PagedResult<WeeklyReportRow>(items, paging.Page, paging.PageSize, total));
+});
 admin.MapGet("/registration-settings", async (AppDbContext db) =>
 {
     var settings = await GetSettingsAsync(db);
@@ -440,7 +573,7 @@ admin.MapPut("/users/{id:guid}/password", async (Guid id, ResetPasswordRequest r
     return Results.Ok(new { user.Id, message = "密码重置成功，目标用户需要使用新密码重新登录。" });
 });
 
-admin.MapGet("/users", async (bool? isActive, string? keyword, int? page, int? pageSize, AppDbContext db) =>
+admin.MapGet("/users", async (bool? isActive, string? keyword, int? page, int? pageSize, AppDbContext db, IBankCardProtector bankCardProtector, ClaimsPrincipal principal, HttpContext context) =>
 {
     var paging = NormalizePaging(page, pageSize);
     var formalUserIds = db.UserRoles
@@ -459,7 +592,7 @@ admin.MapGet("/users", async (bool? isActive, string? keyword, int? page, int? p
     var total = await query.CountAsync();
     var users = await query.OrderBy(user => user.DisplayName).ThenBy(user => user.PhoneNumber)
         .Skip((paging.Page - 1) * paging.PageSize).Take(paging.PageSize)
-        .Select(user => new { user.Id, user.DisplayName, PhoneNumber = user.PhoneNumber ?? string.Empty, user.IsActive })
+        .Select(user => new { user.Id, user.DisplayName, user.PersonalName, user.BankCardProtected, PhoneNumber = user.PhoneNumber ?? string.Empty, user.IsActive })
         .ToListAsync();
     var userIds = users.Select(user => user.Id).ToList();
     var roleRows = await db.UserRoles.AsNoTracking()
@@ -473,10 +606,14 @@ admin.MapGet("/users", async (bool? isActive, string? keyword, int? page, int? p
     {
         user.Id,
         user.DisplayName,
+        user.PersonalName,
+        bankCardNumber = string.IsNullOrWhiteSpace(user.BankCardProtected) ? null : bankCardProtector.Unprotect(user.BankCardProtected),
         user.PhoneNumber,
         user.IsActive,
         roles = rolesByUserId.GetValueOrDefault(user.Id, [])
     }).Cast<object>().ToList();
+    await AuditAsync(db, GetUserId(principal), "UserBankCardsViewed", "UserDirectory", "paged", context.TraceIdentifier, System.Text.Json.JsonSerializer.Serialize(new { page = paging.Page, count = items.Count }));
+    await db.SaveChangesAsync();
     return Results.Ok(new PagedResult<object>(items, paging.Page, paging.PageSize, total));
 });
 
@@ -498,6 +635,27 @@ admin.MapGet("/applicants", async (string? keyword, int? page, int? pageSize, Ap
         .Select(user => new { user.Id, user.DisplayName, PhoneNumber = user.PhoneNumber! })
         .ToListAsync();
     return Results.Ok(new PagedResult<object>(items.Cast<object>().ToList(), paging.Page, paging.PageSize, total));
+});
+
+admin.MapPost("/users/{id:guid}/bank-card/copied", async (Guid id, AppDbContext db, ClaimsPrincipal principal, HttpContext context) =>
+{
+    if (!await db.Users.AsNoTracking().AnyAsync(x => x.Id == id && x.BankCardProtected != null)) return Results.NotFound();
+    await AuditAsync(db, GetUserId(principal), "UserBankCardCopied", "User", id.ToString(), context.TraceIdentifier);
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
+
+admin.MapGet("/users/{id:guid}/payment-profile", async (Guid id, AppDbContext db, IBankCardProtector bankCardProtector, ClaimsPrincipal principal, HttpContext context) =>
+{
+    var user = await db.Users.AsNoTracking()
+        .Where(x => x.Id == id)
+        .Select(x => new { x.Id, x.DisplayName, x.PersonalName, x.BankCardProtected })
+        .SingleOrDefaultAsync();
+    if (user is null) return Results.NotFound();
+    var bankCardNumber = string.IsNullOrWhiteSpace(user.BankCardProtected) ? null : bankCardProtector.Unprotect(user.BankCardProtected);
+    await AuditAsync(db, GetUserId(principal), "UserPaymentProfileViewed", "User", id.ToString(), context.TraceIdentifier);
+    await db.SaveChangesAsync();
+    return Results.Ok(new { user.Id, user.DisplayName, user.PersonalName, bankCardNumber });
 });
 
 admin.MapPost("/users/{id:guid}/{action:regex(^enable|disable$)}", async (Guid id, string action, AppDbContext db, ClaimsPrincipal principal, HttpContext context) =>
@@ -600,16 +758,22 @@ admin.MapPost("/projects/{id:guid}/{action:regex(^enable|disable$)}", async (Gui
     return Results.Ok(new { project.Id, project.IsActive, project.ConcurrencyToken });
 });
 
-admin.MapGet("/claims", async (Guid? projectId, Guid? applicantId, ClaimStatus? status, PayoutStatus? payoutStatus, DateTimeOffset? createdFrom, DateTimeOffset? createdTo, int? page, int? pageSize, AppDbContext db) =>
+admin.MapGet("/claims", async (Guid? projectId, Guid? applicantId, ClaimStatus? status, PayoutStatus? payoutStatus, string? workQueue, DateTimeOffset? createdFrom, DateTimeOffset? createdTo, int? page, int? pageSize, AppDbContext db) =>
 {
     var paging = NormalizePaging(page, pageSize);
     var query = db.ReimbursementClaims.AsNoTracking().AsQueryable();
-    if (status == ClaimStatus.Submitted)
-        query = query.Where(x => x.CurrentVersionId != null && x.CurrentVersion!.SupersededAt == null);
     if (projectId.HasValue) query = query.Where(x => x.CurrentVersion!.ProjectId == projectId.Value);
     if (applicantId.HasValue) query = query.Where(x => x.ApplicantId == applicantId.Value);
-    if (status.HasValue) query = query.Where(x => x.Status == status.Value); else query = query.Where(x => x.Status != ClaimStatus.Cancelled);
-    if (payoutStatus.HasValue) query = query.Where(x => x.PayoutStatus == payoutStatus.Value);
+    if (string.Equals(workQueue, "approval", StringComparison.OrdinalIgnoreCase))
+        query = query.Where(x => x.Status == ClaimStatus.Submitted || x.CurrentVersion!.MealAllowance!.Status == MealAllowanceStatus.PendingReview);
+    else if (string.Equals(workQueue, "payout", StringComparison.OrdinalIgnoreCase))
+        query = query.Where(x => (x.Status == ClaimStatus.Approved && x.PayoutStatus == PayoutStatus.Pending)
+            || (x.CurrentVersion!.MealAllowance!.Status == MealAllowanceStatus.Approved && x.CurrentVersion.MealAllowance.PayoutStatus == PayoutStatus.Pending));
+    else
+    {
+        if (status.HasValue) query = query.Where(x => x.Status == status.Value); else query = query.Where(x => x.Status != ClaimStatus.Cancelled);
+        if (payoutStatus.HasValue) query = query.Where(x => x.PayoutStatus == payoutStatus.Value);
+    }
     if (createdFrom.HasValue) query = query.Where(x => x.CreatedAt >= createdFrom.Value);
     if (createdTo.HasValue) query = query.Where(x => x.CreatedAt < createdTo.Value.AddDays(1));
     var total = await query.CountAsync();
@@ -618,15 +782,21 @@ admin.MapGet("/claims", async (Guid? projectId, Guid? applicantId, ClaimStatus? 
     return Results.Ok(new { items, page = paging.Page, pageSize = paging.PageSize, total, summary = new { claimCount = total, totalAmount } });
 });
 
-admin.MapGet("/claims/group-summary", async (string groupBy, Guid? projectId, Guid? applicantId, ClaimStatus? status, PayoutStatus? payoutStatus, DateTimeOffset? createdFrom, DateTimeOffset? createdTo, AppDbContext db) =>
+admin.MapGet("/claims/group-summary", async (string groupBy, Guid? projectId, Guid? applicantId, ClaimStatus? status, PayoutStatus? payoutStatus, string? workQueue, DateTimeOffset? createdFrom, DateTimeOffset? createdTo, AppDbContext db) =>
 {
     var query = db.ReimbursementClaims.AsNoTracking().AsQueryable();
-    if (status == ClaimStatus.Submitted)
-        query = query.Where(x => x.CurrentVersionId != null && x.CurrentVersion!.SupersededAt == null);
     if (projectId.HasValue) query = query.Where(x => x.CurrentVersion!.ProjectId == projectId.Value);
     if (applicantId.HasValue) query = query.Where(x => x.ApplicantId == applicantId.Value);
-    if (status.HasValue) query = query.Where(x => x.Status == status.Value); else query = query.Where(x => x.Status != ClaimStatus.Cancelled);
-    if (payoutStatus.HasValue) query = query.Where(x => x.PayoutStatus == payoutStatus.Value);
+    if (string.Equals(workQueue, "approval", StringComparison.OrdinalIgnoreCase))
+        query = query.Where(x => x.Status == ClaimStatus.Submitted || x.CurrentVersion!.MealAllowance!.Status == MealAllowanceStatus.PendingReview);
+    else if (string.Equals(workQueue, "payout", StringComparison.OrdinalIgnoreCase))
+        query = query.Where(x => (x.Status == ClaimStatus.Approved && x.PayoutStatus == PayoutStatus.Pending)
+            || (x.CurrentVersion!.MealAllowance!.Status == MealAllowanceStatus.Approved && x.CurrentVersion.MealAllowance.PayoutStatus == PayoutStatus.Pending));
+    else
+    {
+        if (status.HasValue) query = query.Where(x => x.Status == status.Value); else query = query.Where(x => x.Status != ClaimStatus.Cancelled);
+        if (payoutStatus.HasValue) query = query.Where(x => x.PayoutStatus == payoutStatus.Value);
+    }
     if (createdFrom.HasValue) query = query.Where(x => x.CreatedAt >= createdFrom.Value);
     if (createdTo.HasValue) query = query.Where(x => x.CreatedAt < createdTo.Value.AddDays(1));
     if (string.Equals(groupBy, "applicant", StringComparison.OrdinalIgnoreCase))
@@ -654,6 +824,21 @@ admin.MapPost("/claims/{id:guid}/versions/{versionId:guid}/reject", async (Guid 
 });
 admin.MapPost("/claims/{id:guid}/payout/confirm", async (Guid id, ConfirmPayoutRequest request, ClaimWorkflowService workflow, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
     Results.Ok(ToClaimResponse(await workflow.ConfirmPayoutAsync(GetUserId(principal), id, request, context.TraceIdentifier, cancellationToken))));
+
+admin.MapPost("/claims/{id:guid}/meal-allowance/approve", async (Guid id, ReviewMealAllowanceRequest request, ClaimWorkflowService workflow, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+    Results.Ok(ToClaimResponse(await workflow.ApproveMealAllowanceAsync(GetUserId(principal), id, request, context.TraceIdentifier, cancellationToken))));
+admin.MapPost("/claims/{id:guid}/meal-allowance/reject", async (Guid id, ReviewMealAllowanceRequest request, ClaimWorkflowService workflow, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+    Results.Ok(ToClaimResponse(await workflow.RejectMealAllowanceAsync(GetUserId(principal), id, request, context.TraceIdentifier, cancellationToken))));
+admin.MapPost("/claims/{id:guid}/meal-allowance/payout/confirm", async (Guid id, ConfirmMealAllowancePayoutRequest request, ClaimWorkflowService workflow, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+    Results.Ok(ToClaimResponse(await workflow.ConfirmMealAllowancePayoutAsync(GetUserId(principal), id, request, context.TraceIdentifier, cancellationToken))));
+
+admin.MapGet("/claims/export.xlsx", async (Guid projectId, DateOnly? submittedFrom, DateOnly? submittedTo, MonthlyClaimExportService exportService, AppDbContext db, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    var result = await exportService.CreateAsync(projectId, submittedFrom, submittedTo, cancellationToken);
+    await AuditAsync(db, GetUserId(principal), "MonthlyClaimsExported", "Project", projectId.ToString(), context.TraceIdentifier, System.Text.Json.JsonSerializer.Serialize(new { result.From, result.To, result.ClaimCount }));
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.File(result.Content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", result.FileName);
+});
 
 app.Run();
 
@@ -701,9 +886,32 @@ static IQueryable<ClaimListRow> ProjectClaimList(IQueryable<ReimbursementClaim> 
     x.CurrentVersion.TotalAmount,
     x.Status,
     x.PayoutStatus,
+    x.CurrentVersion.MealAllowance != null ? x.CurrentVersion.MealAllowance.Status : null,
+    x.CurrentVersion.MealAllowance != null ? x.CurrentVersion.MealAllowance.PayoutStatus : null,
+    x.CurrentVersion.MealAllowance != null ? x.CurrentVersion.MealAllowance.Days : null,
+    x.CurrentVersion.MealAllowance != null ? x.CurrentVersion.MealAllowance.TotalAmount : null,
+    x.CurrentVersion.MealAllowance != null ? x.CurrentVersion.MealAllowance.ConcurrencyToken : null,
     x.ConcurrencyToken,
     x.CreatedAt,
     x.UpdatedAt));
+
+static IQueryable<WeeklyReportRow> ProjectWeeklyReports(IQueryable<WeeklyReport> query) => query.Select(x => new WeeklyReportRow(
+    x.Id,
+    x.AuthorId,
+    x.Author.DisplayName,
+    x.Author.PersonalName,
+    x.ProjectId,
+    x.Project.Code,
+    x.Project.Name,
+    x.WeekStart,
+    x.CompletedWork,
+    x.NextWeekPlan,
+    x.Issues,
+    x.LastEditedById,
+    x.LastEditedBy.DisplayName,
+    x.CreatedAt,
+    x.UpdatedAt,
+    x.ConcurrencyToken));
 
 static object ToClaimResponse(ReimbursementClaim claim) => new
 {
@@ -723,7 +931,7 @@ static object ToClaimResponse(ReimbursementClaim claim) => new
     claim.CancelledAt,
     claim.PaidAt,
     approvalRecords = claim.ApprovalRecords.OrderBy(x => x.CreatedAt).Select(x => new { x.ClaimVersionId, versionNumber = x.ClaimVersion.VersionNumber, x.FromStatus, x.ToStatus, x.ActorId, actorDisplayName = x.ActorDisplayName, x.Comment, x.CreatedAt }),
-    payoutRecord = claim.PayoutRecord is null ? null : new { claim.PayoutRecord.ApprovedVersionId, claim.PayoutRecord.Amount, claim.PayoutRecord.ConfirmedById, confirmedByDisplayName = claim.PayoutRecord.ConfirmedByDisplayName, claim.PayoutRecord.Note, claim.PayoutRecord.ConfirmedAt }
+    payoutRecord = claim.PayoutRecord is null ? null : new { claim.PayoutRecord.ApprovedVersionId, claim.PayoutRecord.Amount, claim.PayoutRecord.RecipientName, claim.PayoutRecord.BankCardLastFour, claim.PayoutRecord.ConfirmedById, confirmedByDisplayName = claim.PayoutRecord.ConfirmedByDisplayName, claim.PayoutRecord.Note, claim.PayoutRecord.ConfirmedAt }
 };
 
 static object ToVersionResponse(ClaimVersion version) => new
@@ -737,6 +945,22 @@ static object ToVersionResponse(ClaimVersion version) => new
     version.CreatedAt,
     version.SupersededAt,
     travelItinerary = version.TravelItinerary is null ? null : new { version.TravelItinerary.DepartureLocation, version.TravelItinerary.Destination, version.TravelItinerary.DepartureDate, version.TravelItinerary.ReturnDate },
+    mealAllowance = version.MealAllowance is null ? null : new
+    {
+        version.MealAllowance.Id,
+        version.MealAllowance.DepartureDate,
+        version.MealAllowance.ReturnDate,
+        version.MealAllowance.Days,
+        version.MealAllowance.DailyAmount,
+        version.MealAllowance.TotalAmount,
+        version.MealAllowance.Status,
+        version.MealAllowance.PayoutStatus,
+        version.MealAllowance.ConcurrencyToken,
+        version.MealAllowance.ReviewedAt,
+        version.MealAllowance.ReviewComment,
+        approvalRecords = version.MealAllowance.ApprovalRecords.OrderBy(x => x.CreatedAt).Select(x => new { x.FromStatus, x.ToStatus, x.DailyAmount, x.TotalAmount, x.ActorId, actorDisplayName = x.ActorDisplayName, x.Comment, x.CreatedAt }),
+        payoutRecord = version.MealAllowance.PayoutRecord is null ? null : new { version.MealAllowance.PayoutRecord.Amount, version.MealAllowance.PayoutRecord.RecipientName, version.MealAllowance.PayoutRecord.BankCardLastFour, version.MealAllowance.PayoutRecord.ConfirmedById, confirmedByDisplayName = version.MealAllowance.PayoutRecord.ConfirmedByDisplayName, version.MealAllowance.PayoutRecord.Note, version.MealAllowance.PayoutRecord.ConfirmedAt }
+    },
     expenseItems = version.ExpenseItems.Select(item => new
     {
         item.Id,
@@ -786,6 +1010,17 @@ static bool CanAccessClaim(ReimbursementClaim claim, ClaimsPrincipal principal) 
 static bool IsValidPhoneNumber(string phoneNumber) => phoneNumber.Length == 11 && phoneNumber[0] == '1' && phoneNumber[1] is >= '3' and <= '9' && phoneNumber.All(char.IsDigit);
 static Dictionary<string, string[]> ToErrors(IEnumerable<IdentityError> errors) => errors.GroupBy(x => x.Code).ToDictionary(x => x.Key, x => x.Select(y => y.Description).ToArray());
 static (int Page, int PageSize) NormalizePaging(int? page, int? pageSize) => (Math.Max(page ?? 1, 1), Math.Clamp(pageSize ?? 20, 1, 100));
+static IResult? ValidateWeeklyReport(DateOnly weekStart, string completedWork, string nextWeekPlan)
+{
+    if (weekStart.DayOfWeek != DayOfWeek.Monday)
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["weekStart"] = ["周报开始日期必须是周一。"] });
+    if (string.IsNullOrWhiteSpace(completedWork) || string.IsNullOrWhiteSpace(nextWeekPlan))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["content"] = ["本周完成情况和下周计划不能为空。"] });
+    if (completedWork.Trim().Length > 4000 || nextWeekPlan.Trim().Length > 4000)
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["content"] = ["周报单项内容不能超过 4000 个字符。"] });
+    return null;
+}
+static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
 static async Task AuditAsync(AppDbContext db, Guid? actorId, string action, string entityType, string entityId, string? traceId, string? context = null)
 {
@@ -808,9 +1043,32 @@ public sealed record ClaimListRow(
     decimal TotalAmount,
     ClaimStatus Status,
     PayoutStatus PayoutStatus,
+    MealAllowanceStatus? MealAllowanceStatus,
+    PayoutStatus? MealAllowancePayoutStatus,
+    int? MealAllowanceDays,
+    decimal? MealAllowanceTotalAmount,
+    Guid? MealAllowanceConcurrencyToken,
     Guid ConcurrencyToken,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+public sealed record WeeklyReportRow(
+    Guid Id,
+    Guid AuthorId,
+    string AuthorDisplayName,
+    string? AuthorPersonalName,
+    Guid ProjectId,
+    string ProjectCode,
+    string ProjectName,
+    DateOnly WeekStart,
+    string CompletedWork,
+    string NextWeekPlan,
+    string? Issues,
+    Guid LastEditedById,
+    string LastEditedByDisplayName,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    Guid ConcurrencyToken);
 
 public partial class Program;
 

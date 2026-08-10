@@ -119,6 +119,12 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 .claim-form-grid, .itinerary-grid, .expense-grid { display: grid; gap: 14px; }
 .claim-form-grid { grid-template-columns: 1fr 1.4fr; }
 .itinerary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.meal-preview { display: grid; grid-template-columns: minmax(160px, auto) 1fr; align-items: center; gap: 18px; margin-top: 2px; padding: 13px 15px; border-left: 3px solid var(--teal); background: #edf4f0; }
+.meal-preview > div { display: grid; gap: 3px; }
+.meal-preview span { color: var(--muted); font-size: 11px; }
+.meal-preview strong { color: var(--spruce); font-size: 18px; }
+.meal-preview p { margin: 0; color: #536860; font-size: 12px; line-height: 1.6; }
+.meal-preview--pending { border-left-color: #a8b5b0; background: #f2f4f3; }
 .expense-grid { grid-template-columns: 1.1fr .8fr 1fr 1.2fr; }
 .claim-form-grid .el-select, .itinerary-grid .el-date-editor, .expense-grid .el-select, .expense-grid .el-date-editor, .expense-grid .el-input-number { width: 100%; }
 .editor-section { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--line); }
@@ -177,6 +183,13 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 .detail-facts dd, .detail-expenses dd { margin: 0; color: var(--ink); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .detail-section-heading { display: flex; align-items: center; justify-content: space-between; margin: 26px 0 10px; }
 .detail-section-heading span { color: var(--muted); font: 11px ui-monospace, Consolas, monospace; }
+.meal-ledger { padding: 16px; border: 1px solid #bfd2ca; border-radius: 6px; background: #f8fbf9; }
+.meal-ledger__summary { display: grid; grid-template-columns: 1.5fr repeat(3, minmax(100px, 1fr)); gap: 12px; }
+.meal-ledger__summary > div { display: grid; gap: 5px; min-width: 0; }
+.meal-ledger__summary span { color: var(--muted); font-size: 11px; }
+.meal-ledger__summary strong { color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
+.meal-ledger__statuses { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #dbe6e1; }
+.meal-ledger__statuses > span:last-child:not(.el-tag) { color: var(--muted); font-size: 12px; }
 .detail-expenses { display: grid; gap: 8px; }
 .detail-expenses > article { padding: 15px 16px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .detail-expense__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -201,6 +214,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 .payout-receipt span { color: #9db6ae; font-size: 11px; }
 .payout-receipt strong { color: #f0bd55; font-size: 20px; }
 .payout-receipt p { margin: 0; color: #bdd0c9; font-size: 12px; }
+.payout-receipt--meal { margin-top: 14px; background: #315b50; }
 .claim-mobile-status { display: flex; gap: 8px; }
 
 /* Administrator claim control desk */
@@ -227,6 +241,13 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 .group-ledger button em { grid-column: 1 / -1; color: var(--teal); font: normal 12px ui-monospace, Consolas, monospace; }
 .group-ledger > p { margin: 0; padding: 10px 2px; color: var(--muted); font-size: 12px; }
 .payout-form { margin-top: 18px; }
+.payment-profile-check { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 8px 14px; min-height: 74px; margin-bottom: 16px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 5px; background: #f8faf9; }
+.payment-profile-check span { color: var(--muted); font-size: 12px; }
+.payment-profile-check strong { color: var(--ink); font: 600 13px ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.field-suffix { margin-left: 8px; color: var(--muted); font-size: 12px; }
+.meal-amount-confirmation { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px 14px; margin: 0 0 18px; padding: 14px 16px; border-left: 3px solid var(--amber); background: #f5f7f5; }
+.meal-amount-confirmation span { color: var(--muted); font-size: 12px; }
+.meal-amount-confirmation strong { color: var(--spruce); font-size: 14px; }
 
 /* Dialogs and management tools */
 .dialog-subject { display: grid; gap: 3px; margin-bottom: 20px; padding: 12px 14px; border-left: 3px solid var(--amber); background: #f5f7f5; }
@@ -289,6 +310,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
   .mobile-record__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
   .mobile-record__head > div { display: grid; gap: 4px; min-width: 0; }
   .mobile-record__head strong { overflow-wrap: anywhere; }
+  .mobile-record__head > strong { flex: 0 0 auto; white-space: nowrap; overflow-wrap: normal; }
   .mobile-record__head span { color: var(--muted); font: 11px ui-monospace, Consolas, monospace; }
   .mobile-record > p { margin: 14px 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
   .mobile-record dl { display: grid; gap: 8px; margin: 14px 0; }
@@ -299,6 +321,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
   .settings-main { padding: 20px; }
   .page-actions { flex-direction: column-reverse; align-items: flex-end; }
   .claim-form-grid, .itinerary-grid, .expense-grid { grid-template-columns: 1fr; }
+  .meal-preview { grid-template-columns: 1fr; gap: 8px; }
   .claim-editor-dialog.el-dialog, .attachment-preview-dialog.el-dialog { width: calc(100vw - 16px) !important; max-height: calc(100dvh - 16px); margin: 8px auto !important; }
   .claim-editor-dialog .el-dialog__body { padding: 8px 16px 18px; }
   .attachment-preview-stage { min-height: 240px; height: 64dvh; }
@@ -316,12 +339,14 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
   .version-heading { flex-direction: column; }
   .detail-facts > div { grid-template-columns: 76px minmax(0, 1fr); }
   .detail-expenses dl { grid-template-columns: 1fr; }
+  .meal-ledger__summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-claim-filters { grid-template-columns: 1fr; }
   .admin-claim-filters > .el-date-editor { grid-column: auto; }
   .claim-summary-band { grid-template-columns: 1fr 1fr; }
   .claim-summary-band > div { padding: 14px; }
   .claim-summary-band > div:nth-child(2) { border-right: 0; }
   .claim-summary-band .summary-mode { grid-column: 1 / -1; border-top: 1px solid #355a52; }
+  .mobile-record__actions { flex-wrap: wrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -330,3 +355,13 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 
 .user-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px; }
 .dialog-note { margin: 0 0 18px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.profile-page { max-width: 760px; }
+.profile-page > .el-alert { margin: 18px 0; }
+.form-panel { margin-top: 20px; padding: 26px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.form-panel__heading { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+.form-panel__heading > .el-icon { width: 38px; height: 38px; color: var(--spruce); border-radius: 6px; background: #edf4f1; }
+.form-panel__heading > div { display: grid; gap: 3px; }
+.form-panel__heading span, .muted-value { color: var(--muted); font-size: 12px; }
+.profile-form-panel .el-form { max-width: 520px; }
+.bank-card-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.bank-card-cell code { color: var(--ink); font: 13px ui-monospace, Consolas, monospace; letter-spacing: 0; overflow-wrap: anywhere; }

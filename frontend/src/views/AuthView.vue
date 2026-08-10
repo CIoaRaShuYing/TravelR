@@ -36,7 +36,8 @@ async function signIn() {
   loading.value = true
   try {
     const result = await createSession(loginForm.phoneNumber.trim(), loginForm.password)
-    if (route.meta.administrator && !result.roles.includes('Administrator')) await router.replace('/claims')
+    if (result.profileIncomplete) await router.replace('/account/profile')
+    else if (route.meta.administrator && !result.roles.includes('Administrator')) await router.replace('/claims')
     else if (route.path === '/') await router.replace('/claims')
     ElMessage.success(`欢迎回来，${result.user.displayName}`)
   } catch (error) {

@@ -3,13 +3,17 @@ export type RegistrationRequestStatus = 'Pending' | 'Approved' | 'Rejected'
 export type ClaimType = 'Travel' | 'General'
 export type ClaimStatus = 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Cancelled'
 export type PayoutStatus = 'NotApplicable' | 'Pending' | 'Paid'
+export type MealAllowanceStatus = 'Draft' | 'PendingTravelReview' | 'PendingReview' | 'Approved' | 'Rejected' | 'Cancelled'
 export type ExpenseCategory = 'DepartureTransport' | 'ReturnTransport' | 'Lodging' | 'OfficeSupplies' | 'Meal' | 'Other' | 'Unspecified'
 
 export type Session = {
   token: string
-  user: { id: string; displayName: string; phoneNumber: string }
+  user: { id: string; displayName: string; phoneNumber: string; profileIncomplete: boolean }
   roles: string[]
+  profileIncomplete: boolean
 }
+
+export type UserProfile = { personalName?: string | null; bankCardNumber?: string | null; profileIncomplete: boolean }
 
 export type PagedResult<T> = { items: T[]; page: number; pageSize: number; total: number }
 
@@ -39,9 +43,13 @@ export type AdminUser = {
   id: string
   displayName: string
   phoneNumber: string
+  personalName?: string | null
+  bankCardNumber?: string | null
   isActive: boolean
   roles: string[]
 }
+
+export type PaymentProfile = { id: string; displayName: string; personalName?: string | null; bankCardNumber?: string | null }
 
 export type ApplicantOption = {
   id: string
@@ -64,6 +72,11 @@ export type ClaimListRow = {
   totalAmount: number
   status: ClaimStatus
   payoutStatus: PayoutStatus
+  mealAllowanceStatus?: MealAllowanceStatus | null
+  mealAllowancePayoutStatus?: PayoutStatus | null
+  mealAllowanceDays?: number | null
+  mealAllowanceTotalAmount?: number | null
+  mealAllowanceConcurrencyToken?: string | null
   concurrencyToken: string
   createdAt: string
   updatedAt: string
@@ -105,7 +118,41 @@ export type ClaimVersion = {
     departureDate?: string | null
     returnDate?: string | null
   } | null
+  mealAllowance?: {
+    id: string
+    departureDate?: string | null
+    returnDate?: string | null
+    days: number
+    dailyAmount?: number | null
+    totalAmount?: number | null
+    status: MealAllowanceStatus
+    payoutStatus: PayoutStatus
+    concurrencyToken: string
+    reviewedAt?: string | null
+    reviewComment?: string | null
+    approvalRecords: Array<{ fromStatus: MealAllowanceStatus; toStatus: MealAllowanceStatus; dailyAmount?: number | null; totalAmount?: number | null; actorId: string; actorDisplayName?: string | null; comment?: string | null; createdAt: string }>
+    payoutRecord?: { amount: number; recipientName: string; bankCardLastFour: string; confirmedById: string; confirmedByDisplayName?: string | null; note?: string | null; confirmedAt: string } | null
+  } | null
   expenseItems: ExpenseItem[]
+}
+
+export type WeeklyReport = {
+  id: string
+  authorId: string
+  authorDisplayName: string
+  authorPersonalName?: string | null
+  projectId: string
+  projectCode: string
+  projectName: string
+  weekStart: string
+  completedWork: string
+  nextWeekPlan: string
+  issues?: string | null
+  lastEditedById: string
+  lastEditedByDisplayName: string
+  createdAt: string
+  updatedAt: string
+  concurrencyToken: string
 }
 
 export type ClaimVersionSummary = {
@@ -224,6 +271,19 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.status === 204 ? (undefined as T) : response.json() as Promise<T>
 }
 
+async function download(path: string) {
+  const response = await fetch(`${baseUrl}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as ApiProblem
+    handleUnauthorized(response.status)
+    throw { ...body, status: response.status } satisfies ApiProblem
+  }
+  const disposition = response.headers.get('content-disposition') ?? ''
+  const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  const quotedName = disposition.match(/filename="([^"]+)"/i)?.[1]
+  return { blob: await response.blob(), fileName: encodedName ? decodeURIComponent(encodedName) : quotedName ?? 'export.xlsx' }
+}
+
 export const api = {
   setToken(value: string) { token = value },
   setUnauthorizedHandler(handler: () => void) { unauthorizedHandler = handler },
@@ -264,6 +324,12 @@ export const api = {
     }
   },
   changePassword: (body: { currentPassword: string; newPassword: string }) => request<{ message: string }>('/me/password', { method: 'PUT', body: JSON.stringify(body) }),
+  getProfile: () => request<UserProfile>('/me/profile'),
+  updateProfile: (body: { personalName: string; bankCardNumber: string }) => request<UserProfile>('/me/profile', { method: 'PUT', body: JSON.stringify(body) }),
+  listWeeklyReports: (filters: { projectId?: string; weekFrom?: string; weekTo?: string; page?: number; pageSize?: number }) => request<PagedResult<WeeklyReport>>(`/weekly-reports${queryString(filters)}`),
+  listAdminWeeklyReports: (filters: { projectId?: string; authorId?: string; weekFrom?: string; weekTo?: string; page?: number; pageSize?: number }) => request<PagedResult<WeeklyReport>>(`/admin/weekly-reports${queryString(filters)}`),
+  createWeeklyReport: (body: { projectId: string; weekStart: string; completedWork: string; nextWeekPlan: string; issues?: string }) => request<WeeklyReport>('/weekly-reports', { method: 'POST', body: JSON.stringify(body) }),
+  updateWeeklyReport: (id: string, body: { projectId: string; weekStart: string; completedWork: string; nextWeekPlan: string; issues?: string; concurrencyToken: string }) => request<WeeklyReport>(`/weekly-reports/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   getAdminSettings: () => request<{ registrationMode: RegistrationMode; updatedAt: string }>('/admin/registration-settings'),
   updateAdminSettings: (registrationMode: RegistrationMode) => request<{ registrationMode: RegistrationMode; updatedAt: string }>('/admin/registration-settings', { method: 'PUT', body: JSON.stringify({ registrationMode }) }),
   listRegistrationRequests: (filters: { status?: RegistrationRequestStatus; page?: number; pageSize?: number }) => request<PagedResult<RegistrationRequest>>(`/admin/registration-requests${queryString(filters)}`),
@@ -273,18 +339,25 @@ export const api = {
   setUserActive: (id: string, active: boolean) => request<{ id: string; isActive: boolean }>(`/admin/users/${id}/${active ? 'enable' : 'disable'}`, { method: 'POST', body: '{}' }),
   setUserAdministrator: (id: string, administrator: boolean) => request<{ id: string; roles: string[] }>(`/admin/users/${id}/administrator/${administrator ? 'grant' : 'revoke'}`, { method: 'POST', body: '{}' }),
   resetUserPassword: (id: string, newPassword: string) => request<{ id: string; message: string }>(`/admin/users/${id}/password`, { method: 'PUT', body: JSON.stringify({ newPassword }) }),
+  recordBankCardCopied: (id: string) => request<void>(`/admin/users/${id}/bank-card/copied`, { method: 'POST', body: '{}' }),
+  getPaymentProfile: (id: string) => request<PaymentProfile>(`/admin/users/${id}/payment-profile`),
   listApplicants: (filters: { keyword?: string; page?: number; pageSize?: number }) => request<PagedResult<ApplicantOption>>(`/admin/applicants${queryString(filters)}`),
   listProjects: (filters: { isActive?: boolean; keyword?: string; page?: number; pageSize?: number }) => request<PagedResult<Project>>(`/admin/projects${queryString(filters)}`),
   createProject: (body: { code: string; name: string; description?: string }) => request<Project>('/admin/projects', { method: 'POST', body: JSON.stringify(body) }),
   updateProject: (id: string, body: { name: string; description?: string; concurrencyToken: string }) => request<Project>(`/admin/projects/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   setProjectActive: (id: string, active: boolean) => request<{ id: string; isActive: boolean; concurrencyToken: string }>(`/admin/projects/${id}/${active ? 'enable' : 'disable'}`, { method: 'POST', body: '{}' }),
-  listAdminClaims: (filters: { projectId?: string; applicantId?: string; status?: ClaimStatus; payoutStatus?: PayoutStatus; createdFrom?: string; createdTo?: string; page?: number; pageSize?: number }) => request<PagedResult<ClaimListRow> & { summary: { claimCount: number; totalAmount: number } }>(`/admin/claims${queryString(filters)}`),
-  getClaimGroupSummary: (filters: { groupBy: 'project' | 'applicant'; projectId?: string; applicantId?: string; status?: ClaimStatus; payoutStatus?: PayoutStatus; createdFrom?: string; createdTo?: string }) => request<Array<{ key: string; label: string; claimCount: number; totalAmount: number }>>(`/admin/claims/group-summary${queryString(filters)}`),
+  listAdminClaims: (filters: { projectId?: string; applicantId?: string; status?: ClaimStatus; payoutStatus?: PayoutStatus; workQueue?: 'approval' | 'payout'; createdFrom?: string; createdTo?: string; page?: number; pageSize?: number }) => request<PagedResult<ClaimListRow> & { summary: { claimCount: number; totalAmount: number } }>(`/admin/claims${queryString(filters)}`),
+  getClaimGroupSummary: (filters: { groupBy: 'project' | 'applicant'; projectId?: string; applicantId?: string; status?: ClaimStatus; payoutStatus?: PayoutStatus; workQueue?: 'approval' | 'payout'; createdFrom?: string; createdTo?: string }) => request<Array<{ key: string; label: string; claimCount: number; totalAmount: number }>>(`/admin/claims/group-summary${queryString(filters)}`),
   reviewClaim: (claimId: string, versionId: string, action: 'approve' | 'reject', body: { expectedCurrentVersionId: string; concurrencyToken: string; comment?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/versions/${versionId}/${action}`, { method: 'POST', body: JSON.stringify(body) }),
   confirmPayout: (claimId: string, body: { expectedCurrentVersionId: string; concurrencyToken: string; note?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/payout/confirm`, { method: 'POST', body: JSON.stringify(body) }),
+  reviewMealAllowance: (claimId: string, action: 'approve' | 'reject', body: { expectedCurrentVersionId: string; claimConcurrencyToken: string; mealConcurrencyToken: string; dailyAmount?: number; comment?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/meal-allowance/${action}`, { method: 'POST', body: JSON.stringify(body) }),
+  confirmMealAllowancePayout: (claimId: string, body: { expectedCurrentVersionId: string; claimConcurrencyToken: string; mealConcurrencyToken: string; note?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/meal-allowance/payout/confirm`, { method: 'POST', body: JSON.stringify(body) }),
+  exportClaims: (filters: { projectId: string; submittedFrom?: string; submittedTo?: string }) => download(`/admin/claims/export.xlsx${queryString(filters)}`),
   message(error: unknown, fallback: string) {
     const data = error as ApiProblem
     if (data.code === 'CLAIM_VERSION_STALE') return '数据已发生变化，请刷新后重试。'
+    if (data.code === 'MEAL_ALLOWANCE_STALE') return '餐补已发生变化，请刷新后重试。'
+    if (data.code === 'PROFILE_INCOMPLETE') return '请先填写个人姓名和银行卡号。'
     if (data.code === 'USER_SELF_DISABLE') return '不能停用当前登录账户。'
     if (data.code === 'LAST_ADMIN_DISABLE') return '不能停用最后一个启用的管理员账户。'
     if (data.code === 'PASSWORD_INCORRECT') return '原密码不正确。'

@@ -1,0 +1,10 @@
+# 新增业务功能：任务清单
+
+| Task | Milestone | Goal | Verification | Status |
+| --- | --- | --- | --- | --- |
+| NB-01 | 用户资料 | 加密保存姓名/银行卡，登录硬门禁，管理员完整查看复制 | 单元/API/浏览器 | done |
+| NB-02 | 自动餐补 | 差旅版本自动生成餐补，两次审核、联动驳回、独立发放 | 状态机/API/浏览器 | done |
+| NB-03 | 周报 | 用户与管理员按项目/周创建、查询和编辑 | 唯一性/权限/API/浏览器 | done |
+| NB-04 | 月度导出 | 按项目和 `SubmittedAt` 区间生成四工作表 XLSX | 文件结构/边界/权限 | done |
+| NB-05 | 数据库 | 生成非破坏性 EF Core 迁移和模型快照 | migration/build | done |
+| NB-06 | 验收 | 后端测试、前端构建、真实 PostgreSQL smoke、浏览器桌面/移动端 | 全量验证 | done |

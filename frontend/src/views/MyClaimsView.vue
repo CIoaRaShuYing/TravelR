@@ -18,6 +18,7 @@ const filters = reactive<{ projectId: string; status: '' | ClaimStatus; page: nu
 
 const statusLabels: Record<string, string> = { Draft: '草稿', Submitted: '待审批', Approved: '已批准', Rejected: '已驳回', Cancelled: '已作废' }
 const payoutLabels: Record<string, string> = { NotApplicable: '无需发放', Pending: '待发放', Paid: '已发放' }
+const mealStatusLabels: Record<string, string> = { Draft: '餐补草稿', PendingTravelReview: '餐补等待差旅审批', PendingReview: '餐补待审批', Approved: '餐补已批准', Rejected: '餐补已驳回', Cancelled: '餐补已作废' }
 
 function money(value: number) { return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(value) }
 function dateTime(value: string) { return new Date(value).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
@@ -91,6 +92,7 @@ onMounted(async () => { await Promise.all([loadProjects(), load()]) })
         <el-table-column label="金额" width="125" align="right"><template #default="scope">{{ money(scope.row.totalAmount) }}</template></el-table-column>
         <el-table-column label="报销状态" width="105"><template #default="scope"><el-tag :type="scope.row.status === 'Approved' ? 'success' : scope.row.status === 'Rejected' ? 'danger' : scope.row.status === 'Submitted' ? 'warning' : 'info'" effect="plain">{{ statusLabels[scope.row.status] }}</el-tag></template></el-table-column>
         <el-table-column label="发放状态" width="105"><template #default="scope"><el-tag :type="scope.row.payoutStatus === 'Paid' ? 'success' : scope.row.payoutStatus === 'Pending' ? 'warning' : 'info'" effect="plain">{{ payoutLabels[scope.row.payoutStatus] }}</el-tag></template></el-table-column>
+        <el-table-column label="餐补" min-width="180"><template #default="scope"><div v-if="scope.row.mealAllowanceStatus" class="primary-cell"><strong>{{ mealStatusLabels[scope.row.mealAllowanceStatus] }}</strong><span>{{ scope.row.mealAllowanceDays }} 天 · {{ scope.row.mealAllowanceTotalAmount == null ? '金额待核定' : money(scope.row.mealAllowanceTotalAmount) }} · {{ payoutLabels[scope.row.mealAllowancePayoutStatus ?? 'NotApplicable'] }}</span></div><span v-else>-</span></template></el-table-column>
         <el-table-column label="更新" width="120"><template #default="scope">{{ dateTime(scope.row.updatedAt) }}</template></el-table-column>
         <el-table-column label="操作" width="132" fixed="right"><template #default="scope"><el-tooltip content="查看详情"><el-button text circle :icon="View" aria-label="查看详情" @click="openDetail(scope.row)" /></el-tooltip><el-tooltip v-if="canEdit(scope.row)" content="编辑报销"><el-button text circle :icon="Edit" aria-label="编辑报销" @click="openEdit(scope.row)" /></el-tooltip><el-tooltip v-if="canEdit(scope.row)" :content="`${cancelLabel(scope.row)}报销`"><el-button text circle type="danger" :icon="Delete" :aria-label="`${cancelLabel(scope.row)}报销`" @click="cancelClaim(scope.row)" /></el-tooltip></template></el-table-column>
       </el-table>
@@ -99,7 +101,8 @@ onMounted(async () => { await Promise.all([loadProjects(), load()]) })
       <article v-for="item in rows" :key="item.id" class="mobile-record claim-mobile-record">
         <div class="mobile-record__head"><div><strong>{{ item.projectName }}</strong><span>{{ item.projectCode }} · {{ item.claimNumber }} · v{{ item.versionNumber }}</span></div><strong>{{ money(item.totalAmount) }}</strong></div>
         <p>{{ item.description || '暂无报销说明' }}</p>
-        <div class="claim-mobile-status"><el-tag effect="plain">{{ statusLabels[item.status] }}</el-tag><el-tag :type="item.payoutStatus === 'Paid' ? 'success' : item.payoutStatus === 'Pending' ? 'warning' : 'info'" effect="plain">{{ payoutLabels[item.payoutStatus] }}</el-tag></div>
+        <div class="claim-mobile-status"><el-tag effect="plain">{{ statusLabels[item.status] }}</el-tag><el-tag :type="item.payoutStatus === 'Paid' ? 'success' : item.payoutStatus === 'Pending' ? 'warning' : 'info'" effect="plain">{{ payoutLabels[item.payoutStatus] }}</el-tag><el-tag v-if="item.mealAllowanceStatus" effect="plain">{{ mealStatusLabels[item.mealAllowanceStatus] }}</el-tag></div>
+        <p v-if="item.mealAllowanceStatus" class="mobile-record__meta">餐补 {{ item.mealAllowanceDays }} 天 · {{ item.mealAllowanceTotalAmount == null ? '金额待核定' : money(item.mealAllowanceTotalAmount) }} · {{ payoutLabels[item.mealAllowancePayoutStatus ?? 'NotApplicable'] }}</p>
         <div class="mobile-record__actions"><el-button :icon="View" @click="openDetail(item)">查看</el-button><el-button v-if="canEdit(item)" :icon="Edit" @click="openEdit(item)">编辑</el-button><el-button v-if="canEdit(item)" type="danger" plain :icon="Delete" @click="cancelClaim(item)">{{ cancelLabel(item) }}</el-button></div>
       </article>
       <el-empty v-if="!loading && rows.length === 0" description="当前筛选条件下没有报销" />

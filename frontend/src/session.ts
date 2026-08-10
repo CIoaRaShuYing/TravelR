@@ -10,6 +10,8 @@ function isSession(value: unknown): value is Session {
     && typeof candidate.user?.id === 'string'
     && typeof candidate.user?.displayName === 'string'
     && typeof candidate.user?.phoneNumber === 'string'
+    && typeof candidate.user?.profileIncomplete === 'boolean'
+    && typeof candidate.profileIncomplete === 'boolean'
     && Array.isArray(candidate.roles)
     && candidate.roles.every(role => typeof role === 'string')
 }
@@ -52,6 +54,7 @@ function persistSession(value: Session) {
 
 export const session = ref<Session | null>(restoreSession())
 export const isAdministrator = computed(() => session.value?.roles.includes('Administrator') ?? false)
+export const profileIncomplete = computed(() => session.value?.profileIncomplete ?? true)
 
 api.setToken(session.value?.token ?? '')
 api.setUnauthorizedHandler(clearSession)
@@ -68,4 +71,10 @@ export function clearSession() {
   api.setToken('')
   session.value = null
   removeStoredSession()
+}
+
+export function markProfileComplete() {
+  if (!session.value) return
+  session.value = { ...session.value, profileIncomplete: false, user: { ...session.value.user, profileIncomplete: false } }
+  persistSession(session.value)
 }

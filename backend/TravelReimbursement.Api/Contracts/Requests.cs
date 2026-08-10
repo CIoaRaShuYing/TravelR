@@ -16,6 +16,10 @@ public sealed record ChangePasswordRequest(
     [property: Required] string CurrentPassword,
     [property: Required, StringLength(100, MinimumLength = 8)] string NewPassword);
 
+public sealed record UpdateProfileRequest(
+    [property: Required, StringLength(100, MinimumLength = 1)] string PersonalName,
+    [property: Required, RegularExpression("^\\d{16,19}$")] string BankCardNumber);
+
 public sealed record ResetPasswordRequest(
     [property: Required, StringLength(100, MinimumLength = 8)] string NewPassword);
 
@@ -65,5 +69,33 @@ public sealed record CreateClaimVersionRequest(
 public sealed record ClaimActionRequest(Guid ExpectedCurrentVersionId, Guid ConcurrencyToken);
 public sealed record ReviewClaimRequest(Guid ExpectedCurrentVersionId, Guid ConcurrencyToken, [property: StringLength(1000)] string? Comment);
 public sealed record ConfirmPayoutRequest(Guid ExpectedCurrentVersionId, Guid ConcurrencyToken, [property: StringLength(1000)] string? Note);
+
+public sealed record ReviewMealAllowanceRequest(
+    Guid ExpectedCurrentVersionId,
+    Guid ClaimConcurrencyToken,
+    Guid MealConcurrencyToken,
+    [property: Range(typeof(decimal), "0.01", "999999999")] decimal? DailyAmount,
+    [property: StringLength(1000)] string? Comment);
+
+public sealed record ConfirmMealAllowancePayoutRequest(
+    Guid ExpectedCurrentVersionId,
+    Guid ClaimConcurrencyToken,
+    Guid MealConcurrencyToken,
+    [property: StringLength(1000)] string? Note);
+
+public sealed record CreateWeeklyReportRequest(
+    Guid ProjectId,
+    DateOnly WeekStart,
+    [property: Required, StringLength(4000)] string CompletedWork,
+    [property: Required, StringLength(4000)] string NextWeekPlan,
+    [property: StringLength(4000)] string? Issues);
+
+public sealed record UpdateWeeklyReportRequest(
+    Guid ProjectId,
+    DateOnly WeekStart,
+    [property: Required, StringLength(4000)] string CompletedWork,
+    [property: Required, StringLength(4000)] string NextWeekPlan,
+    [property: StringLength(4000)] string? Issues,
+    Guid ConcurrencyToken);
 
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, int Total);

@@ -20,6 +20,14 @@ const showVersionHistory = computed(() => props.includeSupersededVersions && ver
 
 const statusLabels: Record<string, string> = { Draft: '草稿', Submitted: '待审批', Approved: '已批准', Rejected: '已驳回', Cancelled: '已作废' }
 const payoutLabels: Record<string, string> = { NotApplicable: '无需发放', Pending: '待发放', Paid: '已发放' }
+const mealStatusLabels: Record<string, string> = {
+  Draft: '草稿',
+  PendingTravelReview: '等待差旅审批',
+  PendingReview: '待餐补审批',
+  Approved: '餐补已批准',
+  Rejected: '餐补已驳回',
+  Cancelled: '餐补已作废',
+}
 const categoryLabels: Record<string, string> = { DepartureTransport: '去程交通', ReturnTransport: '回程交通', Lodging: '住宿', OfficeSupplies: '办公用品', Meal: '餐费', Other: '其他' }
 
 function money(value: number) { return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(value) }
@@ -100,6 +108,44 @@ watch(() => props.modelValue, open => { if (open) initialize() })
               <div><dt>版本时间</dt><dd>{{ dateTime(selectedVersion.createdAt) }}</dd></div>
               <div v-if="selectedVersion.travelItinerary"><dt>差旅行程</dt><dd>{{ selectedVersion.travelItinerary.departureLocation || '-' }} → {{ selectedVersion.travelItinerary.destination || '-' }}<br>{{ selectedVersion.travelItinerary.departureDate || '-' }} 至 {{ selectedVersion.travelItinerary.returnDate || '-' }}</dd></div>
             </dl>
+
+            <template v-if="selectedVersion.mealAllowance">
+              <div class="detail-section-heading"><h3>餐补</h3><span>随差旅行程自动申请</span></div>
+              <div class="meal-ledger">
+                <div class="meal-ledger__summary">
+                  <div><span>行程日期</span><strong>{{ selectedVersion.mealAllowance.departureDate || '-' }} 至 {{ selectedVersion.mealAllowance.returnDate || '-' }}</strong></div>
+                  <div><span>餐补天数</span><strong>{{ selectedVersion.mealAllowance.days }} 天</strong></div>
+                  <div><span>每日金额</span><strong>{{ selectedVersion.mealAllowance.dailyAmount == null ? '待审核' : money(selectedVersion.mealAllowance.dailyAmount) }}</strong></div>
+                  <div><span>餐补总额</span><strong>{{ selectedVersion.mealAllowance.totalAmount == null ? '待审核' : money(selectedVersion.mealAllowance.totalAmount) }}</strong></div>
+                </div>
+                <div class="meal-ledger__statuses">
+                  <el-tag effect="plain">{{ mealStatusLabels[selectedVersion.mealAllowance.status] }}</el-tag>
+                  <el-tag :type="selectedVersion.mealAllowance.payoutStatus === 'Paid' ? 'success' : selectedVersion.mealAllowance.payoutStatus === 'Pending' ? 'warning' : 'info'" effect="plain">{{ payoutLabels[selectedVersion.mealAllowance.payoutStatus] }}</el-tag>
+                  <span v-if="selectedVersion.mealAllowance.reviewComment">审核意见：{{ selectedVersion.mealAllowance.reviewComment }}</span>
+                </div>
+              </div>
+
+              <template v-if="selectedVersion.mealAllowance.approvalRecords.length">
+                <div class="detail-section-heading"><h3>餐补审核记录</h3><span>{{ selectedVersion.mealAllowance.approvalRecords.length }} 条</span></div>
+                <el-timeline class="approval-timeline">
+                  <el-timeline-item v-for="record in selectedVersion.mealAllowance.approvalRecords" :key="`${record.createdAt}-${record.toStatus}`" :timestamp="dateTime(record.createdAt)">
+                    <strong>{{ mealStatusLabels[record.fromStatus] }} → {{ mealStatusLabels[record.toStatus] }}</strong>
+                    <p>操作人：{{ record.actorDisplayName || record.actorId }}</p>
+                    <p v-if="record.dailyAmount != null">核定金额：{{ money(record.dailyAmount) }} / 天，共 {{ money(record.totalAmount ?? 0) }}</p>
+                    <p v-if="record.comment">意见：{{ record.comment }}</p>
+                  </el-timeline-item>
+                </el-timeline>
+              </template>
+
+              <div v-if="selectedVersion.mealAllowance.payoutRecord" class="payout-receipt payout-receipt--meal">
+                <span>餐补发放记录</span>
+                <strong>{{ money(selectedVersion.mealAllowance.payoutRecord.amount) }}</strong>
+                <p>收款人：{{ selectedVersion.mealAllowance.payoutRecord.recipientName }} · 卡号尾号 {{ selectedVersion.mealAllowance.payoutRecord.bankCardLastFour }}</p>
+                <p>发放人：{{ selectedVersion.mealAllowance.payoutRecord.confirmedByDisplayName || selectedVersion.mealAllowance.payoutRecord.confirmedById }}</p>
+                <p>确认时间：{{ dateTime(selectedVersion.mealAllowance.payoutRecord.confirmedAt) }}</p>
+                <p v-if="selectedVersion.mealAllowance.payoutRecord.note">备注：{{ selectedVersion.mealAllowance.payoutRecord.note }}</p>
+              </div>
+            </template>
 
             <div class="detail-section-heading"><h3>费用明细</h3><span>{{ selectedVersion.expenseItems.length }} 项</span></div>
             <div class="detail-expenses">

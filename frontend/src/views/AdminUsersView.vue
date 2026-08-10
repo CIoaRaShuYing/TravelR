@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Key, Refresh, SwitchButton } from '@element-plus/icons-vue'
+import { CopyDocument, Key, Refresh, SwitchButton } from '@element-plus/icons-vue'
 import { api, type AdminUser } from '../api'
 import { session } from '../session'
 
@@ -94,6 +94,17 @@ function openResetPassword(user: AdminUser) {
   resetDialog.visible = true
 }
 
+async function copyBankCard(user: AdminUser) {
+  if (!user.bankCardNumber) return
+  try {
+    await navigator.clipboard.writeText(user.bankCardNumber)
+    await api.recordBankCardCopied(user.id)
+    ElMessage.success('银行卡号已复制。')
+  } catch (error) {
+    ElMessage.error(api.message(error, '复制银行卡号失败。'))
+  }
+}
+
 async function resetPassword() {
   if (!resetDialog.target) return
   if (!resetDialog.newPassword || !resetDialog.confirmPassword) {
@@ -143,6 +154,8 @@ onMounted(load)
       <el-table :data="rows" empty-text="当前没有正式用户。">
         <el-table-column label="用户" min-width="180"><template #default="scope"><div class="primary-cell"><strong>{{ scope.row.displayName }}</strong><span>{{ scope.row.id.slice(0, 8) }}</span></div></template></el-table-column>
         <el-table-column prop="phoneNumber" label="手机号" min-width="150" />
+        <el-table-column prop="personalName" label="个人姓名" min-width="130"><template #default="scope">{{ scope.row.personalName || '未填写' }}</template></el-table-column>
+        <el-table-column label="银行卡号" min-width="245"><template #default="scope"><div v-if="scope.row.bankCardNumber" class="bank-card-cell"><code>{{ scope.row.bankCardNumber }}</code><el-tooltip content="复制银行卡号"><el-button text circle :icon="CopyDocument" aria-label="复制银行卡号" @click="copyBankCard(scope.row)" /></el-tooltip></div><span v-else class="muted-value">未填写</span></template></el-table-column>
         <el-table-column label="角色" min-width="190"><template #default="scope"><div class="user-role-tags"><el-tag v-for="role in scope.row.roles" :key="role" effect="plain">{{ roleLabel(role) }}</el-tag><el-tag v-if="isSuperAdministrator(scope.row)" type="warning" effect="plain">超级管理员</el-tag></div></template></el-table-column>
         <el-table-column label="状态" width="100"><template #default="scope"><el-tag :type="statusType(scope.row.isActive)" effect="plain">{{ scope.row.isActive ? '启用' : '停用' }}</el-tag></template></el-table-column>
         <el-table-column label="操作" width="270" fixed="right"><template #default="scope">
@@ -159,6 +172,7 @@ onMounted(load)
     <div class="mobile-list" v-loading="loading">
       <article v-for="item in rows" :key="item.id" class="mobile-record">
         <div class="mobile-record__head"><div><strong>{{ item.displayName }}</strong><span>{{ item.phoneNumber }}</span></div><el-tag :type="statusType(item.isActive)" effect="plain">{{ item.isActive ? '启用' : '停用' }}</el-tag></div>
+        <dl><div><dt>姓名</dt><dd>{{ item.personalName || '未填写' }}</dd></div><div><dt>银行卡</dt><dd><span v-if="item.bankCardNumber" class="bank-card-cell"><code>{{ item.bankCardNumber }}</code><el-button text circle :icon="CopyDocument" @click="copyBankCard(item)" /></span><span v-else>未填写</span></dd></div></dl>
         <div class="user-role-tags mobile-user-roles"><el-tag v-for="role in item.roles" :key="role" effect="plain">{{ roleLabel(role) }}</el-tag><el-tag v-if="isSuperAdministrator(item)" type="warning" effect="plain">超级管理员</el-tag></div>
         <div class="mobile-record__actions">
           <el-button size="small" plain :disabled="item.id === session?.user.id" @click="openResetPassword(item)"><el-icon><Key /></el-icon>重置密码</el-button>

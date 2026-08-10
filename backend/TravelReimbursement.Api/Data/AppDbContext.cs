@@ -14,11 +14,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ReimbursementClaim> ReimbursementClaims => Set<ReimbursementClaim>();
     public DbSet<ClaimVersion> ClaimVersions => Set<ClaimVersion>();
     public DbSet<TravelItinerary> TravelItineraries => Set<TravelItinerary>();
+    public DbSet<MealAllowance> MealAllowances => Set<MealAllowance>();
+    public DbSet<MealAllowanceApprovalRecord> MealAllowanceApprovalRecords => Set<MealAllowanceApprovalRecord>();
+    public DbSet<MealAllowancePayoutRecord> MealAllowancePayoutRecords => Set<MealAllowancePayoutRecord>();
     public DbSet<ExpenseItem> ExpenseItems => Set<ExpenseItem>();
     public DbSet<AttachmentAsset> AttachmentAssets => Set<AttachmentAsset>();
     public DbSet<ExpenseItemAttachment> ExpenseItemAttachments => Set<ExpenseItemAttachment>();
     public DbSet<ApprovalRecord> ApprovalRecords => Set<ApprovalRecord>();
     public DbSet<PayoutRecord> PayoutRecords => Set<PayoutRecord>();
+    public DbSet<WeeklyReport> WeeklyReports => Set<WeeklyReport>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -44,6 +48,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.HasIndex(x => x.PhoneNumber).IsUnique();
             entity.Property(x => x.PhoneNumber).HasMaxLength(11);
             entity.Property(x => x.DisplayName).HasMaxLength(100);
+            entity.Property(x => x.PersonalName).HasMaxLength(100);
+            entity.Property(x => x.BankCardProtected).HasMaxLength(2048);
         });
         builder.Entity<Project>(entity =>
         {
@@ -81,6 +87,38 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.Property(x => x.TotalAmount).HasPrecision(18, 2);
             entity.HasOne(x => x.Project).WithMany(x => x.ClaimVersions).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.TravelItinerary).WithOne(x => x.ClaimVersion).HasForeignKey<TravelItinerary>(x => x.ClaimVersionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.MealAllowance).WithOne(x => x.ClaimVersion).HasForeignKey<MealAllowance>(x => x.ClaimVersionId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<MealAllowance>(entity =>
+        {
+            entity.HasIndex(x => x.ClaimVersionId).IsUnique();
+            entity.HasIndex(x => new { x.Status, x.UpdatedAt });
+            entity.HasIndex(x => new { x.PayoutStatus, x.UpdatedAt });
+            entity.Property(x => x.DailyAmount).HasPrecision(18, 2);
+            entity.Property(x => x.TotalAmount).HasPrecision(18, 2);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.PayoutStatus).HasConversion<string>().HasMaxLength(16);
+            entity.Property(x => x.ReviewComment).HasMaxLength(1000);
+            entity.Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+        });
+        builder.Entity<MealAllowanceApprovalRecord>(entity =>
+        {
+            entity.HasIndex(x => new { x.MealAllowanceId, x.CreatedAt });
+            entity.Property(x => x.FromStatus).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.ToStatus).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.DailyAmount).HasPrecision(18, 2);
+            entity.Property(x => x.TotalAmount).HasPrecision(18, 2);
+            entity.Property(x => x.Comment).HasMaxLength(1000);
+            entity.HasOne(x => x.MealAllowance).WithMany(x => x.ApprovalRecords).HasForeignKey(x => x.MealAllowanceId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<MealAllowancePayoutRecord>(entity =>
+        {
+            entity.HasIndex(x => x.MealAllowanceId).IsUnique();
+            entity.Property(x => x.Amount).HasPrecision(18, 2);
+            entity.Property(x => x.RecipientName).HasMaxLength(100);
+            entity.Property(x => x.BankCardLastFour).HasMaxLength(4);
+            entity.Property(x => x.Note).HasMaxLength(1000);
+            entity.HasOne(x => x.MealAllowance).WithOne(x => x.PayoutRecord).HasForeignKey<MealAllowancePayoutRecord>(x => x.MealAllowanceId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<TravelItinerary>(entity =>
         {
@@ -130,9 +168,23 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             entity.HasIndex(x => x.ClaimId).IsUnique();
             entity.Property(x => x.Amount).HasPrecision(18, 2);
+            entity.Property(x => x.RecipientName).HasMaxLength(100);
+            entity.Property(x => x.BankCardLastFour).HasMaxLength(4);
             entity.Property(x => x.Note).HasMaxLength(1000);
             entity.HasOne(x => x.Claim).WithOne(x => x.PayoutRecord).HasForeignKey<PayoutRecord>(x => x.ClaimId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.ApprovedVersion).WithMany().HasForeignKey(x => x.ApprovedVersionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<WeeklyReport>(entity =>
+        {
+            entity.HasIndex(x => new { x.AuthorId, x.ProjectId, x.WeekStart }).IsUnique();
+            entity.HasIndex(x => new { x.ProjectId, x.WeekStart });
+            entity.Property(x => x.CompletedWork).HasMaxLength(4000);
+            entity.Property(x => x.NextWeekPlan).HasMaxLength(4000);
+            entity.Property(x => x.Issues).HasMaxLength(4000);
+            entity.Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+            entity.HasOne(x => x.Author).WithMany().HasForeignKey(x => x.AuthorId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.LastEditedBy).WithMany().HasForeignKey(x => x.LastEditedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Project).WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         builder.Entity<AuditLog>(entity =>
         {

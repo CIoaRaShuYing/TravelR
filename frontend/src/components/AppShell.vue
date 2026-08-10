@@ -1,21 +1,23 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { DocumentChecked, FolderOpened, Key, Menu, Setting, SwitchButton, Tickets, User, UserFilled } from '@element-plus/icons-vue'
-import { clearSession, isAdministrator, session } from '../session'
+import { Calendar, CreditCard, DocumentChecked, FolderOpened, Key, Menu, Setting, SwitchButton, Tickets, User, UserFilled } from '@element-plus/icons-vue'
+import { clearSession, isAdministrator, profileIncomplete, session } from '../session'
 
 const route = useRoute()
 const router = useRouter()
 const drawerOpen = ref(false)
 
 const navItems = computed(() => [
-  { path: '/claims', label: '我的报销', icon: Tickets, visible: true },
+  { path: '/account/profile', label: '个人资料', icon: CreditCard, visible: true },
+  { path: '/claims', label: '我的报销', icon: Tickets, visible: !profileIncomplete.value },
+  { path: '/weekly-reports', label: '项目周报', icon: Calendar, visible: !profileIncomplete.value },
   { path: '/account/security', label: '账号安全', icon: Key, visible: true },
-  { path: '/admin/users', label: '用户中心', icon: UserFilled, visible: isAdministrator.value },
-  { path: '/admin/registrations', label: '注册审批', icon: User, visible: isAdministrator.value },
-  { path: '/admin/projects', label: '项目管理', icon: FolderOpened, visible: isAdministrator.value },
-  { path: '/admin/claims', label: '报销管理', icon: DocumentChecked, visible: isAdministrator.value },
-  { path: '/admin/settings', label: '注册策略', icon: Setting, visible: isAdministrator.value },
+  { path: '/admin/users', label: '用户中心', icon: UserFilled, visible: isAdministrator.value && !profileIncomplete.value },
+  { path: '/admin/registrations', label: '注册审批', icon: User, visible: isAdministrator.value && !profileIncomplete.value },
+  { path: '/admin/projects', label: '项目管理', icon: FolderOpened, visible: isAdministrator.value && !profileIncomplete.value },
+  { path: '/admin/claims', label: '报销管理', icon: DocumentChecked, visible: isAdministrator.value && !profileIncomplete.value },
+  { path: '/admin/settings', label: '注册策略', icon: Setting, visible: isAdministrator.value && !profileIncomplete.value },
 ].filter(item => item.visible))
 
 async function navigate(path: string) {
