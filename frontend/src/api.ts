@@ -143,6 +143,7 @@ export type ClaimDetail = {
     fromStatus: ClaimStatus
     toStatus: ClaimStatus
     actorId: string
+    actorDisplayName?: string | null
     comment?: string | null
     createdAt: string
   }>
@@ -150,6 +151,7 @@ export type ClaimDetail = {
     approvedVersionId: string
     amount: number
     confirmedById: string
+    confirmedByDisplayName?: string | null
     note?: string | null
     confirmedAt: string
   } | null

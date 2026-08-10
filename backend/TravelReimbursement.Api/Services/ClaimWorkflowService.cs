@@ -222,14 +222,36 @@ public sealed class ClaimWorkflowService(AppDbContext db)
         return claim;
     }
 
-    public async Task<ReimbursementClaim?> LoadClaimAsync(Guid claimId, CancellationToken cancellationToken) => await db.ReimbursementClaims
-        .Include(x => x.Applicant)
-        .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.Project)
-        .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.TravelItinerary)
-        .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.ExpenseItems).ThenInclude(x => x.AttachmentLinks).ThenInclude(x => x.AttachmentAsset)
-        .Include(x => x.ApprovalRecords).ThenInclude(x => x.ClaimVersion)
-        .Include(x => x.PayoutRecord)
-        .SingleOrDefaultAsync(x => x.Id == claimId, cancellationToken);
+    public async Task<ReimbursementClaim?> LoadClaimAsync(Guid claimId, CancellationToken cancellationToken)
+    {
+        var claim = await db.ReimbursementClaims
+            .Include(x => x.Applicant)
+            .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.Project)
+            .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.TravelItinerary)
+            .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.ExpenseItems).ThenInclude(x => x.AttachmentLinks).ThenInclude(x => x.AttachmentAsset)
+            .Include(x => x.ApprovalRecords).ThenInclude(x => x.ClaimVersion)
+            .Include(x => x.PayoutRecord)
+            .SingleOrDefaultAsync(x => x.Id == claimId, cancellationToken);
+
+        if (claim is null) return null;
+
+        var actorIds = claim.ApprovalRecords.Select(x => x.ActorId)
+            .Append(claim.PayoutRecord?.ConfirmedById ?? Guid.Empty)
+            .Where(x => x != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (actorIds.Length == 0) return claim;
+
+        var actorNames = await db.Users.AsNoTracking()
+            .Where(x => actorIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.DisplayName })
+            .ToDictionaryAsync(x => x.Id, x => x.DisplayName, cancellationToken);
+        foreach (var record in claim.ApprovalRecords)
+            record.ActorDisplayName = actorNames.GetValueOrDefault(record.ActorId);
+        if (claim.PayoutRecord is not null)
+            claim.PayoutRecord.ConfirmedByDisplayName = actorNames.GetValueOrDefault(claim.PayoutRecord.ConfirmedById);
+        return claim;
+    }
 
     private async Task<ReimbursementClaim> ReviewAsync(
         Guid administratorId,

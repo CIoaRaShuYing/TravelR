@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.AspNetCore.Identity;
 
 namespace TravelReimbursement.Api.Domain;
@@ -164,6 +165,8 @@ public sealed class ApprovalRecord
     public ClaimStatus FromStatus { get; set; }
     public ClaimStatus ToStatus { get; set; }
     public Guid ActorId { get; set; }
+    [NotMapped]
+    public string? ActorDisplayName { get; set; }
     public string? Comment { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
@@ -177,6 +180,8 @@ public sealed class PayoutRecord
     public ClaimVersion ApprovedVersion { get; set; } = null!;
     public decimal Amount { get; set; }
     public Guid ConfirmedById { get; set; }
+    [NotMapped]
+    public string? ConfirmedByDisplayName { get; set; }
     public string? Note { get; set; }
     public DateTimeOffset ConfirmedAt { get; set; } = DateTimeOffset.UtcNow;
 }

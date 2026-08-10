@@ -722,8 +722,8 @@ static object ToClaimResponse(ReimbursementClaim claim) => new
     claim.ReviewedAt,
     claim.CancelledAt,
     claim.PaidAt,
-    approvalRecords = claim.ApprovalRecords.OrderBy(x => x.CreatedAt).Select(x => new { x.ClaimVersionId, versionNumber = x.ClaimVersion.VersionNumber, x.FromStatus, x.ToStatus, x.ActorId, x.Comment, x.CreatedAt }),
-    payoutRecord = claim.PayoutRecord is null ? null : new { claim.PayoutRecord.ApprovedVersionId, claim.PayoutRecord.Amount, claim.PayoutRecord.ConfirmedById, claim.PayoutRecord.Note, claim.PayoutRecord.ConfirmedAt }
+    approvalRecords = claim.ApprovalRecords.OrderBy(x => x.CreatedAt).Select(x => new { x.ClaimVersionId, versionNumber = x.ClaimVersion.VersionNumber, x.FromStatus, x.ToStatus, x.ActorId, actorDisplayName = x.ActorDisplayName, x.Comment, x.CreatedAt }),
+    payoutRecord = claim.PayoutRecord is null ? null : new { claim.PayoutRecord.ApprovedVersionId, claim.PayoutRecord.Amount, claim.PayoutRecord.ConfirmedById, confirmedByDisplayName = claim.PayoutRecord.ConfirmedByDisplayName, claim.PayoutRecord.Note, claim.PayoutRecord.ConfirmedAt }
 };
 
 static object ToVersionResponse(ClaimVersion version) => new

@@ -24,6 +24,7 @@ const categoryLabels: Record<string, string> = { DepartureTransport: '去程交�
 
 function money(value: number) { return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(value) }
 function dateTime(value?: string | null) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
+function approvalActorLabel(status: string) { return status === 'Approved' ? '批准人' : status === 'Rejected' ? '驳回人' : '操作人' }
 function previewAttachment(attachment: Attachment) { previewTarget.value = attachment; previewOpen.value = true }
 
 async function initialize() {
@@ -116,12 +117,20 @@ watch(() => props.modelValue, open => { if (open) initialize() })
               <div class="detail-section-heading"><h3>状态记录</h3><span>{{ detail.approvalRecords.length }} 条</span></div>
               <el-timeline class="approval-timeline">
                 <el-timeline-item v-for="record in detail.approvalRecords" :key="`${record.claimVersionId}-${record.createdAt}`" :timestamp="dateTime(record.createdAt)">
-                  <strong>v{{ record.versionNumber }} · {{ statusLabels[record.fromStatus] }} → {{ statusLabels[record.toStatus] }}</strong><p v-if="record.comment">{{ record.comment }}</p>
+                  <strong>v{{ record.versionNumber }} · {{ statusLabels[record.fromStatus] }} → {{ statusLabels[record.toStatus] }}</strong>
+                  <p>{{ approvalActorLabel(record.toStatus) }}：{{ record.actorDisplayName || record.actorId }}</p>
+                  <p v-if="record.comment">意见：{{ record.comment }}</p>
                 </el-timeline-item>
               </el-timeline>
             </template>
 
-            <div v-if="detail.payoutRecord" class="payout-receipt"><span>发放记录</span><strong>{{ money(detail.payoutRecord.amount) }}</strong><p>{{ dateTime(detail.payoutRecord.confirmedAt) }}{{ detail.payoutRecord.note ? ` · ${detail.payoutRecord.note}` : '' }}</p></div>
+            <div v-if="detail.payoutRecord" class="payout-receipt">
+              <span>发放记录</span>
+              <strong>{{ money(detail.payoutRecord.amount) }}</strong>
+              <p>发放人：{{ detail.payoutRecord.confirmedByDisplayName || detail.payoutRecord.confirmedById }}</p>
+              <p>确认时间：{{ dateTime(detail.payoutRecord.confirmedAt) }}</p>
+              <p v-if="detail.payoutRecord.note">备注：{{ detail.payoutRecord.note }}</p>
+            </div>
           </section>
         </div>
       </template>
