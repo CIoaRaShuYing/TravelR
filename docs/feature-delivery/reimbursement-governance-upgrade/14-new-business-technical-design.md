@@ -30,7 +30,7 @@
 - `GET/POST/PUT /api/weekly-reports`：本人周报查询、创建、编辑。
 - `GET /api/admin/weekly-reports`：管理员查询；管理员编辑复用 `PUT /api/weekly-reports/{id}`，端点内按作者或管理员角色授权。
 - `GET /api/admin/claims/export.zip`：项目必选，`submittedFrom/submittedTo` 可选，返回 ZIP；根目录包含 XLSX 和 `报销凭证/`，凭证从当前有效版本的费用明细附件逐项读取。
-- `GET /api/admin/claims/export.xlsx`：保留现有直接 XLSX 下载兼容入口，避免破坏既有调用；管理页面默认使用 ZIP 接口。
+- `GET /api/admin/claims/export.xlsx`：保留旧路径作为 ZIP 别名，返回内容、`Content-Type` 和文件名均与 ZIP 接口一致，确保旧前端或缓存页面也不会继续下载单独 Excel。
 
 ## 前端
 
@@ -40,6 +40,7 @@
 - 报销管理增加餐补待审核/待发放状态与两次操作。
 - 新增统一周报页；普通用户维护本人，管理员可切换查看和编辑所有用户。
 - 报销管理增加项目、提交日期区间和 ZIP 导出，默认上月 10 日至本月 10 日；下载提示明确压缩包包含 Excel 与报销凭证。
+- Element Plus 全局使用 `zh-cn` locale，日期选择器的月份、星期和操作按钮统一显示中文。
 
 ## 实施补充
 

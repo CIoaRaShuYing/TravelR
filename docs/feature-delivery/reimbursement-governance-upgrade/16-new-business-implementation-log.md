@@ -44,3 +44,10 @@
 - 自动化验证：`dotnet test TravelReimbursement.slnx -c Release --no-restore -p:BaseOutputPath=D:\Code\chuchai\.tmp\validation-bin\` 通过；覆盖 ZIP 结构、文件内容、个人姓名金额命名、重名序号、空凭证目录、缺失文件和总计行。
 - 前端验证：`npx.cmd vue-tsc -p tsconfig.app.json --noEmit --incremental false` 与 Vite 生产构建通过，仅有既有大分块提示。
 - 当前状态：NB-07 完成；尚未在真实业务数据库执行 HTTP 导出验收。
+
+### NB-07 运行反馈修复
+
+- 反馈：页面仍下载 Excel，日期选择器显示英文。
+- 根因：旧前端或缓存页面仍可能调用保留的 `/api/admin/claims/export.xlsx`，而该兼容入口此前仍返回单独 Excel；Element Plus 未配置全局中文 locale。
+- 修复：`/api/admin/claims/export.xlsx` 改为 `/api/admin/claims/export.zip` 的 ZIP 别名，两个路径均返回 `application/zip` 和 `.zip` 文件名；前端全局启用 Element Plus `zh-cn` locale。
+- 运行边界：当前工作站未运行 chuchai 服务；监听 `localhost:5000` 的进程属于 `D:\Code\trusted-data-space`，因此不能据此验证 chuchai 部署实例，目标环境仍需重新构建并重启前后端。

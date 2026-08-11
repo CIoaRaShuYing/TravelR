@@ -832,7 +832,12 @@ admin.MapPost("/claims/{id:guid}/meal-allowance/reject", async (Guid id, ReviewM
 admin.MapPost("/claims/{id:guid}/meal-allowance/payout/confirm", async (Guid id, ConfirmMealAllowancePayoutRequest request, ClaimWorkflowService workflow, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
     Results.Ok(ToClaimResponse(await workflow.ConfirmMealAllowancePayoutAsync(GetUserId(principal), id, request, context.TraceIdentifier, cancellationToken))));
 
-admin.MapGet("/claims/export.zip", async (Guid projectId, DateOnly? submittedFrom, DateOnly? submittedTo, MonthlyClaimExportService exportService, AppDbContext db, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+admin.MapGet("/claims/export.zip", ExportClaimsArchiveAsync);
+admin.MapGet("/claims/export.xlsx", ExportClaimsArchiveAsync);
+
+app.Run();
+
+static async Task<IResult> ExportClaimsArchiveAsync(Guid projectId, DateOnly? submittedFrom, DateOnly? submittedTo, MonthlyClaimExportService exportService, AppDbContext db, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken)
 {
     var result = await exportService.CreateArchiveAsync(projectId, submittedFrom, submittedTo, cancellationToken);
     try
@@ -846,17 +851,7 @@ admin.MapGet("/claims/export.zip", async (Guid projectId, DateOnly? submittedFro
         throw;
     }
     return Results.File(result.Content, "application/zip", result.FileName);
-});
-
-admin.MapGet("/claims/export.xlsx", async (Guid projectId, DateOnly? submittedFrom, DateOnly? submittedTo, MonthlyClaimExportService exportService, AppDbContext db, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
-{
-    var result = await exportService.CreateAsync(projectId, submittedFrom, submittedTo, cancellationToken);
-    await AuditAsync(db, GetUserId(principal), "MonthlyClaimsExported", "Project", projectId.ToString(), context.TraceIdentifier, System.Text.Json.JsonSerializer.Serialize(new { result.From, result.To, result.ClaimCount }));
-    await db.SaveChangesAsync(cancellationToken);
-    return Results.File(result.Content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", result.FileName);
-});
-
-app.Run();
+}
 
 static async Task SeedAsync(IServiceProvider services)
 {
