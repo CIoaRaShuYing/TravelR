@@ -29,6 +29,17 @@ public sealed class XlsxWorkbookWriterTests
         Assert.Contains("餐补明细", workbook, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Summary_total_row_places_claim_count_and_amount_in_summary_columns()
+    {
+        var row = MonthlyClaimExportService.CreateSummaryTotalRow(3, 456.78m);
+
+        Assert.Equal("总计", row[0]);
+        Assert.Equal("共 3 笔", row[1]);
+        Assert.Equal(456.78m, row[8]);
+        Assert.Equal(12, row.Length);
+    }
+
     private static string ReadEntry(ZipArchive archive, string name)
     {
         using var reader = new StreamReader(archive.GetEntry(name)!.Open(), Encoding.UTF8);

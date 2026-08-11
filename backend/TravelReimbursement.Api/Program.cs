@@ -832,6 +832,22 @@ admin.MapPost("/claims/{id:guid}/meal-allowance/reject", async (Guid id, ReviewM
 admin.MapPost("/claims/{id:guid}/meal-allowance/payout/confirm", async (Guid id, ConfirmMealAllowancePayoutRequest request, ClaimWorkflowService workflow, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
     Results.Ok(ToClaimResponse(await workflow.ConfirmMealAllowancePayoutAsync(GetUserId(principal), id, request, context.TraceIdentifier, cancellationToken))));
 
+admin.MapGet("/claims/export.zip", async (Guid projectId, DateOnly? submittedFrom, DateOnly? submittedTo, MonthlyClaimExportService exportService, AppDbContext db, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    var result = await exportService.CreateArchiveAsync(projectId, submittedFrom, submittedTo, cancellationToken);
+    try
+    {
+        await AuditAsync(db, GetUserId(principal), "MonthlyClaimsArchiveExported", "Project", projectId.ToString(), context.TraceIdentifier, System.Text.Json.JsonSerializer.Serialize(new { result.From, result.To, result.ClaimCount, result.AttachmentCount }));
+        await db.SaveChangesAsync(cancellationToken);
+    }
+    catch
+    {
+        await result.Content.DisposeAsync();
+        throw;
+    }
+    return Results.File(result.Content, "application/zip", result.FileName);
+});
+
 admin.MapGet("/claims/export.xlsx", async (Guid projectId, DateOnly? submittedFrom, DateOnly? submittedTo, MonthlyClaimExportService exportService, AppDbContext db, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
 {
     var result = await exportService.CreateAsync(projectId, submittedFrom, submittedTo, cancellationToken);

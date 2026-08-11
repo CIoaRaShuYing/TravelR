@@ -30,3 +30,17 @@
 
 - 现有业务数据库尚未执行迁移；部署前必须备份数据库与 Data Protection 密钥目录，再在目标环境执行迁移和上线验收。
 - Data Protection 密钥必须持久化并纳入备份，否则历史银行卡密文无法解密。
+
+## 2026-08-11
+
+### NB-07 导出归档包
+
+- 已确认：月度导出改为包含 Excel 和 `报销凭证/` 的 ZIP；凭证用户名使用 `PersonalName`，金额使用凭证所属费用明细金额。
+- 已确认：Excel“报销汇总”末尾增加报销笔数和报销金额总计行，餐补不重复计入。
+- 已完成：核对 `MonthlyClaimExportService`、当前有效版本附件关系、`IPrivateFileStore` 和前端下载链路；确定保留原 XLSX 兼容入口，并新增 ZIP 默认入口。
+- 已实现：新增 `/api/admin/claims/export.zip`，根目录包含原四工作表 Excel 和 `报销凭证/`；凭证逐项从私有存储写入临时 ZIP，响应流关闭后删除临时文件；缺失文件返回 `EXPORT_ATTACHMENT_UNAVAILABLE`，不返回部分压缩包。
+- 已实现：凭证按 `PersonalName_费用明细金额.原扩展名` 命名，非法字符替换为 `_`，同名追加序号；前端默认下载 ZIP，同时保留 `/api/admin/claims/export.xlsx` 兼容入口。
+- 已实现：Excel“报销汇总”末尾增加总计行，显示笔数和报销金额列合计，餐补不重复计入。
+- 自动化验证：`dotnet test TravelReimbursement.slnx -c Release --no-restore -p:BaseOutputPath=D:\Code\chuchai\.tmp\validation-bin\` 通过；覆盖 ZIP 结构、文件内容、个人姓名金额命名、重名序号、空凭证目录、缺失文件和总计行。
+- 前端验证：`npx.cmd vue-tsc -p tsconfig.app.json --noEmit --incremental false` 与 Vite 生产构建通过，仅有既有大分块提示。
+- 当前状态：NB-07 完成；尚未在真实业务数据库执行 HTTP 导出验收。

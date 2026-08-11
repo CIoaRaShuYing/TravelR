@@ -9,10 +9,43 @@ using TravelReimbursement.Api.Domain;
 namespace TravelReimbursement.Api.Services;
 
 public sealed record MonthlyClaimExportResult(byte[] Content, string FileName, DateOnly From, DateOnly To, int ClaimCount);
+public sealed record MonthlyClaimArchiveResult(Stream Content, string FileName, DateOnly From, DateOnly To, int ClaimCount, int AttachmentCount);
 
-public sealed class MonthlyClaimExportService(AppDbContext db)
+public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore fileStore)
 {
     public async Task<MonthlyClaimExportResult> CreateAsync(Guid projectId, DateOnly? submittedFrom, DateOnly? submittedTo, CancellationToken cancellationToken)
+    {
+        var package = await CreatePackageAsync(projectId, submittedFrom, submittedTo, cancellationToken);
+        return new MonthlyClaimExportResult(package.Workbook, package.WorkbookFileName, package.From, package.To, package.ClaimCount);
+    }
+
+    public async Task<MonthlyClaimArchiveResult> CreateArchiveAsync(Guid projectId, DateOnly? submittedFrom, DateOnly? submittedTo, CancellationToken cancellationToken)
+    {
+        var package = await CreatePackageAsync(projectId, submittedFrom, submittedTo, cancellationToken);
+        var archiveFileName = Path.ChangeExtension(package.WorkbookFileName, ".zip");
+        var tempPath = Path.Combine(Path.GetTempPath(), $"travel-reimbursement-export-{Guid.NewGuid():N}.zip");
+        try
+        {
+            await using (var output = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous))
+            {
+                await MonthlyClaimArchiveWriter.WriteAsync(output, package.WorkbookFileName, package.Workbook, package.Attachments, fileStore, cancellationToken);
+            }
+            var stream = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.DeleteOnClose);
+            return new MonthlyClaimArchiveResult(stream, archiveFileName, package.From, package.To, package.ClaimCount, package.Attachments.Count);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or UnauthorizedAccessException or IOException)
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+            throw new ApiProblemException(StatusCodes.Status409Conflict, "EXPORT_ATTACHMENT_UNAVAILABLE", "报销凭证文件缺失或无法读取，导出已取消。");
+        }
+        catch
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+            throw;
+        }
+    }
+
+    private async Task<MonthlyClaimExportPackage> CreatePackageAsync(Guid projectId, DateOnly? submittedFrom, DateOnly? submittedTo, CancellationToken cancellationToken)
     {
         var project = await db.Projects.AsNoTracking().SingleOrDefaultAsync(x => x.Id == projectId, cancellationToken)
             ?? throw new ApiProblemException(StatusCodes.Status404NotFound, "PROJECT_NOT_FOUND", "项目不存在。");
@@ -26,6 +59,7 @@ public sealed class MonthlyClaimExportService(AppDbContext db)
         var claims = await db.ReimbursementClaims.AsNoTracking()
             .Include(x => x.Applicant)
             .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.ExpenseItems)
+                .ThenInclude(x => x.AttachmentLinks).ThenInclude(x => x.AttachmentAsset)
             .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.TravelItinerary)
             .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.MealAllowance)
             .Where(x => x.CurrentVersion != null
@@ -60,6 +94,7 @@ public sealed class MonthlyClaimExportService(AppDbContext db)
             if (version.MealAllowance is { } meal)
                 meals.Add([claim.ClaimNumber, meal.Days, meal.DailyAmount, meal.TotalAmount, meal.Status.ToString(), meal.PayoutStatus.ToString()]);
         }
+        summary.Add(CreateSummaryTotalRow(claims.Count, claims.Sum(claim => claim.CurrentVersion!.TotalAmount)));
 
         var content = XlsxWorkbookWriter.Write([
             new("报销汇总", summary),
@@ -67,11 +102,22 @@ public sealed class MonthlyClaimExportService(AppDbContext db)
             new("行程明细", travel),
             new("餐补明细", meals)
         ]);
+        var attachments = claims.SelectMany(claim => claim.CurrentVersion!.ExpenseItems.SelectMany(item => item.AttachmentLinks.Select(link =>
+            new MonthlyClaimArchiveAttachment(
+                claim.Applicant.PersonalName,
+                item.Amount ?? 0m,
+                link.AttachmentAsset.OriginalFileName,
+                link.AttachmentAsset.ObjectKey))))
+            .ToList();
         var safeCode = string.Concat(project.Code.Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_'));
-        return new MonthlyClaimExportResult(content, $"报销导出_{safeCode}_{from:yyyyMMdd}_{to:yyyyMMdd}.xlsx", from, to, claims.Count);
+        var workbookFileName = $"报销导出_{safeCode}_{from:yyyyMMdd}_{to:yyyyMMdd}.xlsx";
+        return new MonthlyClaimExportPackage(content, workbookFileName, from, to, claims.Count, attachments);
     }
 
     private static string? FormatInstant(DateTimeOffset? value) => value?.ToOffset(TimeSpan.FromHours(8)).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    internal static object?[] CreateSummaryTotalRow(int claimCount, decimal totalAmount) =>
+        ["总计", $"共 {claimCount} 笔", null, null, null, null, null, null, totalAmount, null, null, null];
 
     private static DateOnly PreviousMonthDay(DateOnly date, int day)
     {
@@ -83,6 +129,66 @@ public sealed class MonthlyClaimExportService(AppDbContext db)
     {
         try { return TimeZoneInfo.FindSystemTimeZoneById("Asia/Shanghai"); }
         catch (TimeZoneNotFoundException) { return TimeZoneInfo.FindSystemTimeZoneById("China Standard Time"); }
+    }
+
+    private sealed record MonthlyClaimExportPackage(byte[] Workbook, string WorkbookFileName, DateOnly From, DateOnly To, int ClaimCount, IReadOnlyList<MonthlyClaimArchiveAttachment> Attachments);
+}
+
+internal sealed record MonthlyClaimArchiveAttachment(string? PersonalName, decimal Amount, string OriginalFileName, string ObjectKey);
+
+internal static class MonthlyClaimArchiveWriter
+{
+    private static readonly HashSet<char> InvalidNameCharacters = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+
+    public static async Task WriteAsync(
+        Stream destination,
+        string workbookFileName,
+        byte[] workbook,
+        IReadOnlyList<MonthlyClaimArchiveAttachment> attachments,
+        IPrivateFileStore fileStore,
+        CancellationToken cancellationToken)
+    {
+        using var archive = new ZipArchive(destination, ZipArchiveMode.Create, leaveOpen: true);
+        var workbookEntry = archive.CreateEntry(SanitizeSegment(workbookFileName, "报销导出.xlsx"), CompressionLevel.Fastest);
+        await using (var workbookTarget = workbookEntry.Open())
+            await workbookTarget.WriteAsync(workbook, cancellationToken);
+
+        archive.CreateEntry("报销凭证/");
+        var usedNames = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var attachment in attachments)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var fileName = CreateUniqueAttachmentName(attachment, usedNames);
+            var entry = archive.CreateEntry($"报销凭证/{fileName}", CompressionLevel.Fastest);
+            await using var source = await fileStore.OpenReadAsync(attachment.ObjectKey, cancellationToken);
+            await using var target = entry.Open();
+            await source.CopyToAsync(target, cancellationToken);
+        }
+    }
+
+    internal static string CreateUniqueAttachmentName(MonthlyClaimArchiveAttachment attachment, IDictionary<string, int> usedNames)
+    {
+        var personalName = SanitizeSegment(attachment.PersonalName, "未填写姓名");
+        var extension = Path.GetExtension(attachment.OriginalFileName);
+        var baseName = $"{personalName}_{attachment.Amount.ToString("0.00", CultureInfo.InvariantCulture)}";
+        var candidate = $"{baseName}{extension}";
+        if (!usedNames.TryGetValue(candidate, out var count))
+        {
+            usedNames[candidate] = 1;
+            return candidate;
+        }
+
+        count++;
+        usedNames[candidate] = count;
+        return $"{baseName}_{count}{extension}";
+    }
+
+    private static string SanitizeSegment(string? value, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return fallback;
+        var sanitized = new string(value.Trim().Select(character =>
+            character < ' ' || InvalidNameCharacters.Contains(character) ? '_' : character).ToArray()).Trim('.', ' ');
+        return string.IsNullOrWhiteSpace(sanitized) ? fallback : sanitized;
     }
 }
 

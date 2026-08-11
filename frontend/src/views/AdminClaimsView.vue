@@ -243,7 +243,7 @@ async function exportClaims() {
     link.click()
     URL.revokeObjectURL(url)
     exportOpen.value = false
-    ElMessage.success('月度报销记录已导出。')
+    ElMessage.success('月度报销 Excel 与凭证压缩包已导出。')
   } catch (error) { ElMessage.error(api.message(error, '导出报销记录失败。')) }
   finally { exporting.value = false }
 }
@@ -256,7 +256,7 @@ onMounted(async () => { await loadOptions(); await load() })
 <template>
   <section>
     <header class="page-header">
-      <div><p class="eyebrow">CLAIM CONTROL DESK</p><h1>报销管理</h1><p>依次审核差旅与餐补，分别确认发放，并按项目导出月度记录。</p></div>
+      <div><p class="eyebrow">CLAIM CONTROL DESK</p><h1>报销管理</h1><p>依次审核差旅与餐补，分别确认发放，并按项目导出月度记录及凭证。</p></div>
       <div class="page-actions"><el-button :icon="Download" @click="exportOpen = true">月度导出</el-button><el-tooltip content="刷新报销"><el-button circle :icon="Refresh" aria-label="刷新报销" @click="load" /></el-tooltip></div>
     </header>
 
@@ -351,8 +351,8 @@ onMounted(async () => { await loadOptions(); await load() })
         <el-form-item label="项目" required><el-select v-model="exportProjectId" filterable placeholder="选择项目"><el-option v-for="project in projects" :key="project.id" :value="project.id" :label="`${project.code} · ${project.name}`" /></el-select></el-form-item>
         <el-form-item label="费用提交日期"><el-date-picker v-model="exportDates" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" /></el-form-item>
       </el-form>
-      <el-alert title="日期留空时，默认导出上月 10 日至本月 10 日（含首尾当天）的已提交记录。" type="info" :closable="false" show-icon />
-      <template #footer><el-button @click="exportOpen = false">取消</el-button><el-button type="primary" :icon="Download" :loading="exporting" @click="exportClaims">导出 XLSX</el-button></template>
+      <el-alert title="将下载包含 Excel 和报销凭证文件夹的 ZIP；日期留空时默认导出上月 10 日至本月 10 日（含首尾当天）的已提交记录。" type="info" :closable="false" show-icon />
+      <template #footer><el-button @click="exportOpen = false">取消</el-button><el-button type="primary" :icon="Download" :loading="exporting" @click="exportClaims">导出 ZIP</el-button></template>
     </el-dialog>
 
     <ClaimDetailDrawer v-model="detailOpen" :claim-id="detailClaimId" :include-superseded-versions="detailIncludesSuperseded" />

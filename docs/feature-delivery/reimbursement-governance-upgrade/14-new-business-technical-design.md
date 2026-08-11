@@ -29,7 +29,8 @@
 - `GET /api/admin/users/{id}/payment-profile`：发放前读取姓名与完整银行卡，并记录审计。
 - `GET/POST/PUT /api/weekly-reports`：本人周报查询、创建、编辑。
 - `GET /api/admin/weekly-reports`：管理员查询；管理员编辑复用 `PUT /api/weekly-reports/{id}`，端点内按作者或管理员角色授权。
-- `GET /api/admin/claims/export.xlsx`：项目必选，`submittedFrom/submittedTo` 可选，返回 XLSX。
+- `GET /api/admin/claims/export.zip`：项目必选，`submittedFrom/submittedTo` 可选，返回 ZIP；根目录包含 XLSX 和 `报销凭证/`，凭证从当前有效版本的费用明细附件逐项读取。
+- `GET /api/admin/claims/export.xlsx`：保留现有直接 XLSX 下载兼容入口，避免破坏既有调用；管理页面默认使用 ZIP 接口。
 
 ## 前端
 
@@ -38,11 +39,14 @@
 - 差旅编辑器显示自动餐补天数，不提供申请开关。
 - 报销管理增加餐补待审核/待发放状态与两次操作。
 - 新增统一周报页；普通用户维护本人，管理员可切换查看和编辑所有用户。
-- 报销管理增加项目、提交日期区间和 XLSX 导出，默认上月 10 日至本月 10 日。
+- 报销管理增加项目、提交日期区间和 ZIP 导出，默认上月 10 日至本月 10 日；下载提示明确压缩包包含 Excel 与报销凭证。
 
 ## 实施补充
 
 - 月度导出先按 `Asia/Shanghai`/中国标准时间构造自然日边界，再转换为 UTC `DateTimeOffset` 传给 Npgsql，兼容 PostgreSQL `timestamp with time zone`。
+- `MonthlyClaimExportService` 继续负责查询和 Excel 生成，并增加 ZIP 组装：条目命名使用 `PersonalName_ExpenseItem.Amount`、原扩展名和同名序号；空数据显式创建 `报销凭证/` 目录条目。
+- “报销汇总”在明细行后追加固定 12 列总计行，报销金额列写入当前查询结果的 `CurrentVersion.TotalAmount` 合计，餐补不重复计入。
+- ZIP 构建写入临时文件后再作为响应流返回，只有全部凭证成功写入后才产生成功响应；响应结束后清理临时文件，避免大附件集合长期占用托管堆内存。
 - 完整银行卡只出现在管理员用户目录和发放资料专用响应；列表、日志、异常和 XLSX 均不包含完整卡号。
 
 ## 迁移与回滚

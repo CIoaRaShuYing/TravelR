@@ -8,3 +8,4 @@
 | NB-04 | 月度导出 | 按项目和 `SubmittedAt` 区间生成四工作表 XLSX | 文件结构/边界/权限 | done |
 | NB-05 | 数据库 | 生成非破坏性 EF Core 迁移和模型快照 | migration/build | done |
 | NB-06 | 验收 | 后端测试、前端构建、真实 PostgreSQL smoke、浏览器桌面/移动端 | 全量验证 | done |
+| NB-07 | 导出归档包 | 输出含 Excel 与凭证目录的 ZIP；凭证按个人姓名和费用明细金额命名，处理重名、非法字符和缺失文件；汇总表增加报销总计行 | ZIP 结构/文件内容/命名/总计/失败路径/API/前端构建 | done |

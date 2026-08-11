@@ -281,7 +281,7 @@ async function download(path: string) {
   const disposition = response.headers.get('content-disposition') ?? ''
   const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
   const quotedName = disposition.match(/filename="([^"]+)"/i)?.[1]
-  return { blob: await response.blob(), fileName: encodedName ? decodeURIComponent(encodedName) : quotedName ?? 'export.xlsx' }
+  return { blob: await response.blob(), fileName: encodedName ? decodeURIComponent(encodedName) : quotedName ?? 'export.zip' }
 }
 
 export const api = {
@@ -352,7 +352,7 @@ export const api = {
   confirmPayout: (claimId: string, body: { expectedCurrentVersionId: string; concurrencyToken: string; note?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/payout/confirm`, { method: 'POST', body: JSON.stringify(body) }),
   reviewMealAllowance: (claimId: string, action: 'approve' | 'reject', body: { expectedCurrentVersionId: string; claimConcurrencyToken: string; mealConcurrencyToken: string; dailyAmount?: number; comment?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/meal-allowance/${action}`, { method: 'POST', body: JSON.stringify(body) }),
   confirmMealAllowancePayout: (claimId: string, body: { expectedCurrentVersionId: string; claimConcurrencyToken: string; mealConcurrencyToken: string; note?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/meal-allowance/payout/confirm`, { method: 'POST', body: JSON.stringify(body) }),
-  exportClaims: (filters: { projectId: string; submittedFrom?: string; submittedTo?: string }) => download(`/admin/claims/export.xlsx${queryString(filters)}`),
+  exportClaims: (filters: { projectId: string; submittedFrom?: string; submittedTo?: string }) => download(`/admin/claims/export.zip${queryString(filters)}`),
   message(error: unknown, fallback: string) {
     const data = error as ApiProblem
     if (data.code === 'CLAIM_VERSION_STALE') return '数据已发生变化，请刷新后重试。'
