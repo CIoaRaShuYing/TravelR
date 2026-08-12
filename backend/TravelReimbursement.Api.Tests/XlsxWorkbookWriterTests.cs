@@ -37,8 +37,42 @@ public sealed class XlsxWorkbookWriterTests
 
         Assert.Equal("总计", row[0]);
         Assert.Equal("共 3 笔", row[1]);
-        Assert.Equal(456.78m, row[8]);
-        Assert.Equal(12, row.Length);
+        Assert.Equal(456.78m, row[9]);
+        Assert.Equal(13, row.Length);
+    }
+
+    [Fact]
+    public void Summary_rows_include_claim_description_between_type_and_status()
+    {
+        var claim = new ReimbursementClaim
+        {
+            ClaimNumber = "BX-001",
+            Applicant = new AppUser { DisplayName = "申请人", PersonalName = "张三" },
+            Type = ClaimType.Travel,
+            Status = ClaimStatus.Approved,
+            PayoutStatus = PayoutStatus.Pending
+        };
+        var version = new ClaimVersion
+        {
+            ProjectCodeSnapshot = "P-001",
+            ProjectNameSnapshot = "项目一",
+            Description = "客户现场差旅",
+            TotalAmount = 456.78m
+        };
+
+        var header = MonthlyClaimExportService.CreateSummaryHeaderRow();
+        var row = MonthlyClaimExportService.CreateSummaryDataRow(claim, version);
+
+        Assert.Equal("类型", header[5]);
+        Assert.Equal("报销说明", header[6]);
+        Assert.Equal("报销状态", header[7]);
+        Assert.Equal("差旅行程", row[5]);
+        Assert.Equal("客户现场差旅", row[6]);
+        Assert.Equal("已批准", row[7]);
+        Assert.Equal("待发放", row[8]);
+        Assert.Equal(456.78m, row[9]);
+        Assert.Equal(13, header.Length);
+        Assert.Equal(header.Length, row.Length);
     }
 
     [Fact]

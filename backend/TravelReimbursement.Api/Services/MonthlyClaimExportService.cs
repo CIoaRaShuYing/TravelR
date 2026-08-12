@@ -73,7 +73,7 @@ public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore
 
         var summary = new List<object?[]>
         {
-            new object?[] { "报销单号", "申请人", "个人姓名", "项目编码", "项目名称", "类型", "报销状态", "报销发放状态", "报销金额", "提交时间", "审核时间", "发放时间" }
+            CreateSummaryHeaderRow()
         };
         var expenses = new List<object?[]> { new object?[] { "报销单号", "费用类别", "费用日期", "金额", "商户/承运方", "说明" } };
         var travel = new List<object?[]> { new object?[] { "报销单号", "出发地", "目的地", "出发日期", "返程日期" } };
@@ -82,11 +82,7 @@ public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore
         foreach (var claim in claims)
         {
             var version = claim.CurrentVersion!;
-            summary.Add([
-                claim.ClaimNumber, claim.Applicant.DisplayName, claim.Applicant.PersonalName,
-                version.ProjectCodeSnapshot, version.ProjectNameSnapshot, ClaimTypeLabel(claim.Type), ClaimStatusLabel(claim.Status), PayoutStatusLabel(claim.PayoutStatus),
-                version.TotalAmount, FormatInstant(claim.SubmittedAt), FormatInstant(claim.ReviewedAt), FormatInstant(claim.PaidAt)
-            ]);
+            summary.Add(CreateSummaryDataRow(claim, version));
             foreach (var item in version.ExpenseItems.OrderBy(x => x.ExpenseDate).ThenBy(x => x.Category))
                 expenses.Add([claim.ClaimNumber, item.Category.ToString(), item.ExpenseDate?.ToString("yyyy-MM-dd"), item.Amount, item.Merchant, item.Note]);
             if (version.TravelItinerary is { } itinerary)
@@ -116,6 +112,17 @@ public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore
 
     private static string? FormatInstant(DateTimeOffset? value) => value?.ToOffset(TimeSpan.FromHours(8)).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
+    internal static object?[] CreateSummaryHeaderRow() =>
+        ["报销单号", "申请人", "个人姓名", "项目编码", "项目名称", "类型", "报销说明", "报销状态", "报销发放状态", "报销金额", "提交时间", "审核时间", "发放时间"];
+
+    internal static object?[] CreateSummaryDataRow(ReimbursementClaim claim, ClaimVersion version) =>
+        [
+            claim.ClaimNumber, claim.Applicant.DisplayName, claim.Applicant.PersonalName,
+            version.ProjectCodeSnapshot, version.ProjectNameSnapshot, ClaimTypeLabel(claim.Type), version.Description,
+            ClaimStatusLabel(claim.Status), PayoutStatusLabel(claim.PayoutStatus), version.TotalAmount,
+            FormatInstant(claim.SubmittedAt), FormatInstant(claim.ReviewedAt), FormatInstant(claim.PaidAt)
+        ];
+
     internal static string ClaimTypeLabel(ClaimType value) => value switch
     {
         ClaimType.Travel => "差旅行程",
@@ -142,7 +149,7 @@ public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore
     };
 
     internal static object?[] CreateSummaryTotalRow(int claimCount, decimal totalAmount) =>
-        ["总计", $"共 {claimCount} 笔", null, null, null, null, null, null, totalAmount, null, null, null];
+        ["总计", $"共 {claimCount} 笔", null, null, null, null, null, null, null, totalAmount, null, null, null];
 
     private static DateOnly PreviousMonthDay(DateOnly date, int day)
     {
