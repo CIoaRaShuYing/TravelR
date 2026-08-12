@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using TravelReimbursement.Api.Domain;
 using TravelReimbursement.Api.Services;
 
 namespace TravelReimbursement.Api.Tests;
@@ -38,6 +39,23 @@ public sealed class XlsxWorkbookWriterTests
         Assert.Equal("共 3 笔", row[1]);
         Assert.Equal(456.78m, row[8]);
         Assert.Equal(12, row.Length);
+    }
+
+    [Fact]
+    public void Export_enum_labels_are_chinese()
+    {
+        Assert.Equal("差旅行程", MonthlyClaimExportService.ClaimTypeLabel(ClaimType.Travel));
+        Assert.Equal("普通单据", MonthlyClaimExportService.ClaimTypeLabel(ClaimType.General));
+
+        Assert.Equal("草稿", MonthlyClaimExportService.ClaimStatusLabel(ClaimStatus.Draft));
+        Assert.Equal("待审批", MonthlyClaimExportService.ClaimStatusLabel(ClaimStatus.Submitted));
+        Assert.Equal("已批准", MonthlyClaimExportService.ClaimStatusLabel(ClaimStatus.Approved));
+        Assert.Equal("已驳回", MonthlyClaimExportService.ClaimStatusLabel(ClaimStatus.Rejected));
+        Assert.Equal("已作废", MonthlyClaimExportService.ClaimStatusLabel(ClaimStatus.Cancelled));
+
+        Assert.Equal("无需发放", MonthlyClaimExportService.PayoutStatusLabel(PayoutStatus.NotApplicable));
+        Assert.Equal("待发放", MonthlyClaimExportService.PayoutStatusLabel(PayoutStatus.Pending));
+        Assert.Equal("已发放", MonthlyClaimExportService.PayoutStatusLabel(PayoutStatus.Paid));
     }
 
     private static string ReadEntry(ZipArchive archive, string name)

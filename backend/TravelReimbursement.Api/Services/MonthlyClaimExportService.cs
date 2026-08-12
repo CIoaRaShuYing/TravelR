@@ -84,7 +84,7 @@ public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore
             var version = claim.CurrentVersion!;
             summary.Add([
                 claim.ClaimNumber, claim.Applicant.DisplayName, claim.Applicant.PersonalName,
-                version.ProjectCodeSnapshot, version.ProjectNameSnapshot, claim.Type.ToString(), claim.Status.ToString(), claim.PayoutStatus.ToString(),
+                version.ProjectCodeSnapshot, version.ProjectNameSnapshot, ClaimTypeLabel(claim.Type), ClaimStatusLabel(claim.Status), PayoutStatusLabel(claim.PayoutStatus),
                 version.TotalAmount, FormatInstant(claim.SubmittedAt), FormatInstant(claim.ReviewedAt), FormatInstant(claim.PaidAt)
             ]);
             foreach (var item in version.ExpenseItems.OrderBy(x => x.ExpenseDate).ThenBy(x => x.Category))
@@ -115,6 +115,31 @@ public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore
     }
 
     private static string? FormatInstant(DateTimeOffset? value) => value?.ToOffset(TimeSpan.FromHours(8)).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    internal static string ClaimTypeLabel(ClaimType value) => value switch
+    {
+        ClaimType.Travel => "差旅行程",
+        ClaimType.General => "普通单据",
+        _ => value.ToString()
+    };
+
+    internal static string ClaimStatusLabel(ClaimStatus value) => value switch
+    {
+        ClaimStatus.Draft => "草稿",
+        ClaimStatus.Submitted => "待审批",
+        ClaimStatus.Approved => "已批准",
+        ClaimStatus.Rejected => "已驳回",
+        ClaimStatus.Cancelled => "已作废",
+        _ => value.ToString()
+    };
+
+    internal static string PayoutStatusLabel(PayoutStatus value) => value switch
+    {
+        PayoutStatus.NotApplicable => "无需发放",
+        PayoutStatus.Pending => "待发放",
+        PayoutStatus.Paid => "已发放",
+        _ => value.ToString()
+    };
 
     internal static object?[] CreateSummaryTotalRow(int claimCount, decimal totalAmount) =>
         ["总计", $"共 {claimCount} 笔", null, null, null, null, null, null, totalAmount, null, null, null];
