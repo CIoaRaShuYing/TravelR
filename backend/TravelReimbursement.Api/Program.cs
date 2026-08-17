@@ -73,6 +73,7 @@ builder.Services.AddDataProtection().SetApplicationName("TravelReimbursement");
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ClaimWorkflowService>();
 builder.Services.AddScoped<MonthlyClaimExportService>();
+builder.Services.AddScoped<WeeklyReportExportService>();
 builder.Services.AddSingleton<IBankCardProtector, BankCardProtector>();
 builder.Services.AddHostedService<StagedAttachmentCleanupService>();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
@@ -385,6 +386,16 @@ secured.MapGet("/weekly-reports", async (Guid? projectId, DateOnly? weekFrom, Da
     return Results.Ok(new PagedResult<WeeklyReportRow>(items, paging.Page, paging.PageSize, total));
 });
 
+secured.MapGet("/weekly-reports/export.xlsx", async (Guid? projectId, DateOnly? weekFrom, DateOnly? weekTo, WeeklyReportExportService exportService, AppDbContext db, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    var userId = GetUserId(principal);
+    var result = await exportService.CreateAsync(userId, projectId, weekFrom, weekTo, cancellationToken);
+    await AuditAsync(db, userId, "WeeklyReportsExported", "WeeklyReport", userId.ToString(), context.TraceIdentifier,
+        System.Text.Json.JsonSerializer.Serialize(new { projectId, weekFrom, weekTo, result.ReportCount }));
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.File(result.Content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", result.FileName);
+});
+
 secured.MapPost("/weekly-reports", async (CreateWeeklyReportRequest request, AppDbContext db, ClaimsPrincipal principal, HttpContext context) =>
 {
     var userId = GetUserId(principal);
@@ -453,6 +464,15 @@ admin.MapGet("/weekly-reports", async (Guid? projectId, Guid? authorId, DateOnly
     var items = await ProjectWeeklyReports(query.OrderByDescending(x => x.WeekStart).ThenBy(x => x.Project.Name).ThenBy(x => x.Author.DisplayName))
         .Skip((paging.Page - 1) * paging.PageSize).Take(paging.PageSize).ToListAsync();
     return Results.Ok(new PagedResult<WeeklyReportRow>(items, paging.Page, paging.PageSize, total));
+});
+admin.MapGet("/weekly-reports/export.xlsx", async (Guid? projectId, Guid? authorId, DateOnly? weekFrom, DateOnly? weekTo, WeeklyReportExportService exportService, AppDbContext db, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    var userId = GetUserId(principal);
+    var result = await exportService.CreateAsync(authorId, projectId, weekFrom, weekTo, cancellationToken);
+    await AuditAsync(db, userId, "AdminWeeklyReportsExported", "WeeklyReport", authorId?.ToString() ?? "all", context.TraceIdentifier,
+        System.Text.Json.JsonSerializer.Serialize(new { projectId, authorId, weekFrom, weekTo, result.ReportCount }));
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.File(result.Content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", result.FileName);
 });
 admin.MapGet("/registration-settings", async (AppDbContext db) =>
 {
