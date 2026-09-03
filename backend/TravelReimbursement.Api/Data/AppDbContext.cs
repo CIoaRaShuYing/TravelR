@@ -23,6 +23,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ApprovalRecord> ApprovalRecords => Set<ApprovalRecord>();
     public DbSet<PayoutRecord> PayoutRecords => Set<PayoutRecord>();
     public DbSet<WeeklyReport> WeeklyReports => Set<WeeklyReport>();
+    public DbSet<MeetingRecord> MeetingRecords => Set<MeetingRecord>();
+    public DbSet<MeetingParticipant> MeetingParticipants => Set<MeetingParticipant>();
+    public DbSet<MeetingRecordItem> MeetingRecordItems => Set<MeetingRecordItem>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -185,6 +188,41 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.HasOne(x => x.Author).WithMany().HasForeignKey(x => x.AuthorId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.LastEditedBy).WithMany().HasForeignKey(x => x.LastEditedById).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.Project).WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<MeetingRecord>(entity =>
+        {
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_MeetingRecords_DeletedState",
+                "(\"DeletedAt\" IS NULL AND \"DeletedById\" IS NULL) OR (\"DeletedAt\" IS NOT NULL AND \"DeletedById\" IS NOT NULL)"));
+            entity.HasQueryFilter(x => x.DeletedAt == null);
+            entity.HasIndex(x => new { x.ProjectId, x.MeetingDate, x.CreatedAt }).HasFilter("\"DeletedAt\" IS NULL");
+            entity.HasIndex(x => new { x.MeetingDate, x.CreatedAt }).HasFilter("\"DeletedAt\" IS NULL");
+            entity.Property(x => x.Location).HasMaxLength(200);
+            entity.Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+            entity.HasOne(x => x.Project).WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.CreatedBy).WithMany().HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.LastEditedBy).WithMany().HasForeignKey(x => x.LastEditedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.DeletedBy).WithMany().HasForeignKey(x => x.DeletedById).OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<MeetingParticipant>(entity =>
+        {
+            entity.HasQueryFilter(x => x.MeetingRecord.DeletedAt == null);
+            entity.HasIndex(x => new { x.MeetingRecordId, x.SortOrder }).IsUnique();
+            entity.Property(x => x.Name).HasMaxLength(100);
+            entity.Property(x => x.Organization).HasMaxLength(200);
+            entity.Property(x => x.Title).HasMaxLength(100);
+            entity.Property(x => x.Phone).HasMaxLength(50);
+            entity.HasOne(x => x.MeetingRecord).WithMany(x => x.Participants).HasForeignKey(x => x.MeetingRecordId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<MeetingRecordItem>(entity =>
+        {
+            entity.HasQueryFilter(x => x.MeetingRecord.DeletedAt == null);
+            entity.HasIndex(x => new { x.MeetingRecordId, x.Kind, x.SortOrder }).IsUnique();
+            entity.Property(x => x.Kind).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.Content).HasMaxLength(4000);
+            entity.Property(x => x.Status).HasMaxLength(100);
+            entity.Property(x => x.Owner).HasMaxLength(100);
+            entity.HasOne(x => x.MeetingRecord).WithMany(x => x.Items).HasForeignKey(x => x.MeetingRecordId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<AuditLog>(entity =>
         {

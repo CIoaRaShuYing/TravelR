@@ -1,6 +1,6 @@
 # 差旅账
 
-差旅报销 Web：支持注册审批、管理员项目管理、项目化报销、不可变版本、私有凭证、审批、发放确认和汇总审计。
+差旅报销 Web：支持注册审批、管理员项目管理、项目化报销、项目周报、共享会议记录、私有凭证、审批、发放确认和汇总审计。
 
 ## 本地开发
 
@@ -13,6 +13,8 @@
 
 附件只保存在本地私有目录，不再依赖 MinIO。开发环境默认使用仓库根目录下的 `private-uploads`；可通过 `FileStorage__LocalPath` 覆盖。该目录不由 Web 服务器直接公开，上传和下载始终经过 API 鉴权。
 
+会议记录每周按中国时区周日 02:00 生成一次全量 ZIP 备份，默认写入仓库根目录下的 `meeting-record-backups`。备份包含版本化 JSON、清单和 SHA-256 校验，不由应用自动删除；可通过 `MeetingRecordBackup__LocalPath` 覆盖。该目录仍需纳入服务器异机备份，单机永久保留不能替代灾备。
+
 ## 容器启动
 
 基于 `.env.example` 准备仅用于本地/部署环境的 `.env`，填写所有密码和 JWT 密钥后执行：
@@ -21,7 +23,7 @@
 docker compose up --build -d
 ```
 
-页面地址为 `http://localhost:8088`，API 为 `http://localhost:8080`。Compose 将附件持久化到 `attachments_data` 卷，API 容器内路径为 `/data/private-uploads`。应用启动时自动执行 `Data/Migrations` 中的迁移，并根据环境变量创建首个管理员账号。首位管理员同时拥有 `Applicant` 和 `Administrator`，系统不再使用独立审核人角色。不要将 `.env` 或任何真实凭据提交到仓库。
+页面地址为 `http://localhost:8088`，API 为 `http://localhost:8080`。Compose 将附件持久化到 `attachments_data` 卷，将会议记录备份持久化到 `meeting_record_backups` 卷。应用启动时自动执行 `Data/Migrations` 中的迁移，并根据环境变量创建首个管理员账号。首位管理员同时拥有 `Applicant` 和 `Administrator`，系统不再使用独立审核人角色。不要将 `.env` 或任何真实凭据提交到仓库。
 
 Linux 生产服务器部署请使用 [Linux 服务器部署手册](docs/linux-deployment-guide.md)。该手册包含生产端口收敛、HTTPS、10MB 附件代理限制、首次部署、备份恢复、升级和故障处理，不建议直接按本地 Compose 端口配置暴露生产服务。
 
@@ -32,6 +34,7 @@ Linux 生产服务器部署请使用 [Linux 服务器部署手册](docs/linux-de
 - 草稿、待审批和驳回报销可以删除/撤回，实际保存为 `Cancelled` 审计状态；已批准报销不可删除。
 - 管理员批准后，发放状态进入 `Pending`；确认发放后进入 `Paid`，系统不提供撤销发放接口。
 - 申请人列表支持项目和报销状态筛选；管理员列表支持项目、申请人、报销状态、发放状态和日期筛选，并提供按项目或申请人汇总。
+- 所有已登录用户共享查看、创建和编辑会议记录；同一项目同一天允许多份，管理员可以软删除。项目导出包含该项目当前全部未删除会议记录，每次会议对应一个 Excel 工作表。
 
 ## 验证
 
@@ -58,5 +61,6 @@ Set-Location frontend; npm.cmd run build
 
 - 数据库备份应在部署前执行，并写入受控备份目录；例如可通过 `docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"'` 导出。恢复必须指向明确的目标数据库，先停掉 `api` 服务并完成备份校验，不能用未知目标执行清库或覆盖操作。
 - 附件保存在开发环境 `private-uploads` 目录或 Compose `attachments_data` 持久卷中，必须与 PostgreSQL 备份同批次保存。恢复时先恢复数据库，再恢复同批次附件目录/卷，最后启动 `api`；不要混用不同时间点的数据。
+- 会议记录周期备份保存在开发环境 `meeting-record-backups` 目录或 Compose `meeting_record_backups` 持久卷中，应用不自动清理；运维备份应同时复制该卷并在异机保留。
 - 本次空库切换完成后不支持恢复旧业务数据。后续常规发布若需回滚数据，应恢复同批次 PostgreSQL 和附件备份，不能只恢复其中一侧。
 - `.env` 仅存放在部署主机，不得提交到仓库、构建产物或日志中。

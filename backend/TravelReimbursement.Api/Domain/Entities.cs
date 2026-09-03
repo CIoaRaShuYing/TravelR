@@ -13,6 +13,7 @@ public enum MealAllowanceStatus { Draft, PendingTravelReview, PendingReview, App
 public enum ExpenseCategory { DepartureTransport, ReturnTransport, Lodging, OfficeSupplies, Meal, Other, Unspecified }
 public enum AttachmentScanStatus { Pending, Accepted, Rejected }
 public enum AttachmentBindingStatus { Staged, Bound }
+public enum MeetingRecordItemKind { Requirement, WorkFocus }
 
 public sealed class AppUser : IdentityUser<Guid>
 {
@@ -264,6 +265,53 @@ public sealed class WeeklyReport
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     [ConcurrencyCheck]
     public Guid ConcurrencyToken { get; set; } = Guid.NewGuid();
+}
+
+public sealed class MeetingRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+    public DateOnly MeetingDate { get; set; }
+    public string Location { get; set; } = string.Empty;
+    public Guid CreatedById { get; set; }
+    public AppUser CreatedBy { get; set; } = null!;
+    public Guid LastEditedById { get; set; }
+    public AppUser LastEditedBy { get; set; } = null!;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public Guid? DeletedById { get; set; }
+    public AppUser? DeletedBy { get; set; }
+    public DateTimeOffset? DeletedAt { get; set; }
+    [ConcurrencyCheck]
+    public Guid ConcurrencyToken { get; set; } = Guid.NewGuid();
+    public List<MeetingParticipant> Participants { get; set; } = [];
+    public List<MeetingRecordItem> Items { get; set; } = [];
+}
+
+public sealed class MeetingParticipant
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid MeetingRecordId { get; set; }
+    public MeetingRecord MeetingRecord { get; set; } = null!;
+    public int SortOrder { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Organization { get; set; }
+    public string? Title { get; set; }
+    public string? Phone { get; set; }
+}
+
+public sealed class MeetingRecordItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid MeetingRecordId { get; set; }
+    public MeetingRecord MeetingRecord { get; set; } = null!;
+    public MeetingRecordItemKind Kind { get; set; }
+    public int SortOrder { get; set; }
+    public string Content { get; set; } = string.Empty;
+    public string? Status { get; set; }
+    public DateOnly? DueDate { get; set; }
+    public string? Owner { get; set; }
 }
 
 public sealed class AuditLog

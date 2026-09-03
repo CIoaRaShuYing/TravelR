@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Calendar, CreditCard, DocumentChecked, FolderOpened, Key, Menu, Setting, SwitchButton, Tickets, User, UserFilled } from '@element-plus/icons-vue'
+import { Calendar, CreditCard, DocumentChecked, FolderOpened, Key, Memo, Menu, Setting, SwitchButton, Tickets, User, UserFilled } from '@element-plus/icons-vue'
 import { clearSession, isAdministrator, profileIncomplete, session } from '../session'
 
 const route = useRoute()
@@ -12,6 +12,7 @@ const navItems = computed(() => [
   { path: '/account/profile', label: '个人资料', icon: CreditCard, visible: true },
   { path: '/claims', label: '我的报销', icon: Tickets, visible: !profileIncomplete.value },
   { path: '/weekly-reports', label: '项目周报', icon: Calendar, visible: !profileIncomplete.value },
+  { path: '/meeting-records', label: '会议记录', icon: Memo, visible: !profileIncomplete.value },
   { path: '/account/security', label: '账号安全', icon: Key, visible: true },
   { path: '/admin/users', label: '用户中心', icon: UserFilled, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/registrations', label: '注册审批', icon: User, visible: isAdministrator.value && !profileIncomplete.value },

@@ -98,4 +98,33 @@ public sealed record UpdateWeeklyReportRequest(
     [property: StringLength(4000)] string? Issues,
     Guid ConcurrencyToken);
 
+public sealed record MeetingParticipantRequest(
+    [property: Required, StringLength(100)] string Name,
+    [property: StringLength(200)] string? Organization,
+    [property: StringLength(100)] string? Title,
+    [property: StringLength(50)] string? Phone);
+
+public sealed record MeetingRecordItemRequest(
+    [property: Required, StringLength(4000)] string Content,
+    [property: StringLength(100)] string? Status,
+    DateOnly? DueDate,
+    [property: StringLength(100)] string? Owner);
+
+public sealed record CreateMeetingRecordRequest(
+    Guid ProjectId,
+    DateOnly MeetingDate,
+    [property: Required, StringLength(200)] string Location,
+    IReadOnlyList<MeetingParticipantRequest> Participants,
+    IReadOnlyList<MeetingRecordItemRequest> Requirements,
+    IReadOnlyList<MeetingRecordItemRequest> WorkFocuses);
+
+public sealed record UpdateMeetingRecordRequest(
+    Guid ProjectId,
+    DateOnly MeetingDate,
+    [property: Required, StringLength(200)] string Location,
+    IReadOnlyList<MeetingParticipantRequest> Participants,
+    IReadOnlyList<MeetingRecordItemRequest> Requirements,
+    IReadOnlyList<MeetingRecordItemRequest> WorkFocuses,
+    Guid ConcurrencyToken);
+
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, int Total);

@@ -74,13 +74,19 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ClaimWorkflowService>();
 builder.Services.AddScoped<MonthlyClaimExportService>();
 builder.Services.AddScoped<WeeklyReportExportService>();
+builder.Services.AddScoped<MeetingRecordService>();
+builder.Services.AddScoped<MeetingRecordExportService>();
+builder.Services.AddScoped<MeetingRecordBackupService>();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IBankCardProtector, BankCardProtector>();
 builder.Services.AddHostedService<StagedAttachmentCleanupService>();
+builder.Services.AddHostedService<MeetingRecordBackupHostedService>();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .WithOrigins("http://localhost:5173")
     .AllowAnyHeader()
     .AllowAnyMethod()));
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("FileStorage"));
+builder.Services.Configure<MeetingRecordBackupOptions>(builder.Configuration.GetSection("MeetingRecordBackup"));
 builder.Services.AddSingleton<IPrivateFileStore, LocalPrivateFileStore>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -451,7 +457,79 @@ secured.MapPut("/weekly-reports/{id:guid}", async (Guid id, UpdateWeeklyReportRe
     return Results.Ok(await ProjectWeeklyReports(db.WeeklyReports.AsNoTracking().Where(x => x.Id == report.Id)).SingleAsync());
 });
 
+secured.MapGet("/meeting-records/projects", async (AppDbContext db, CancellationToken cancellationToken) =>
+    Results.Ok(await db.Projects.AsNoTracking()
+        .Where(project => project.IsActive || db.MeetingRecords.Any(record => record.ProjectId == project.Id))
+        .OrderBy(project => project.Name)
+        .Select(project => new { project.Id, project.Code, project.Name, project.IsActive })
+        .ToListAsync(cancellationToken)));
+
+secured.MapGet("/meeting-records", async (
+    Guid? projectId,
+    DateOnly? dateFrom,
+    DateOnly? dateTo,
+    int? page,
+    int? pageSize,
+    MeetingRecordService service,
+    CancellationToken cancellationToken) =>
+{
+    var paging = NormalizePaging(page, pageSize);
+    return Results.Ok(await service.ListAsync(projectId, dateFrom, dateTo, paging.Page, paging.PageSize, cancellationToken));
+});
+
+secured.MapGet("/meeting-records/export.xlsx", async (
+    Guid projectId,
+    MeetingRecordExportService exportService,
+    AppDbContext db,
+    ClaimsPrincipal principal,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
+{
+    var result = await exportService.CreateAsync(projectId, cancellationToken);
+    await AuditAsync(db, GetUserId(principal), "MeetingRecordsExported", "Project", projectId.ToString(), context.TraceIdentifier,
+        System.Text.Json.JsonSerializer.Serialize(new { projectId, result.RecordCount }));
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.File(result.Content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", result.FileName);
+});
+
+secured.MapGet("/meeting-records/{id:guid}", async (Guid id, MeetingRecordService service, CancellationToken cancellationToken) =>
+{
+    var record = await service.GetAsync(id, cancellationToken);
+    return record is null ? Results.NotFound() : Results.Ok(record);
+});
+
+secured.MapPost("/meeting-records", async (
+    CreateMeetingRecordRequest request,
+    MeetingRecordService service,
+    ClaimsPrincipal principal,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
+{
+    var record = await service.CreateAsync(GetUserId(principal), request, context.TraceIdentifier, cancellationToken);
+    return Results.Created($"/api/meeting-records/{record.Id}", record);
+});
+
+secured.MapPut("/meeting-records/{id:guid}", async (
+    Guid id,
+    UpdateMeetingRecordRequest request,
+    MeetingRecordService service,
+    ClaimsPrincipal principal,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await service.UpdateAsync(GetUserId(principal), id, request, context.TraceIdentifier, cancellationToken)));
+
 var admin = secured.MapGroup("/admin").RequireAuthorization(new AuthorizeAttribute { Roles = "Administrator" });
+admin.MapDelete("/meeting-records/{id:guid}", async (
+    Guid id,
+    Guid concurrencyToken,
+    MeetingRecordService service,
+    ClaimsPrincipal principal,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
+{
+    await service.DeleteAsync(GetUserId(principal), id, concurrencyToken, context.TraceIdentifier, cancellationToken);
+    return Results.NoContent();
+});
 admin.MapGet("/weekly-reports", async (Guid? projectId, Guid? authorId, DateOnly? weekFrom, DateOnly? weekTo, int? page, int? pageSize, AppDbContext db) =>
 {
     var paging = NormalizePaging(page, pageSize);

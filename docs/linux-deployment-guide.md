@@ -30,10 +30,10 @@ Web 容器（Nginx + Vue）
    | /api -> http://api:8080
    v
 API 容器（ASP.NET Core 8）
-   |                         |
-   | PostgreSQL             | /data/private-uploads
-   v                         v
-PostgreSQL 容器          attachments_data 卷
+   |                         |                         |
+   | PostgreSQL             | /data/private-uploads   | /data/meeting-record-backups
+   v                         v                         v
+PostgreSQL 容器          attachments_data 卷       meeting_record_backups 卷
    |
    v
 postgres_data 卷
@@ -283,8 +283,12 @@ services:
       BootstrapAdmin__Password: ${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD in .env}
       FileStorage__LocalPath: /data/private-uploads
       FileStorage__StagedRetentionHours: 24
+      MeetingRecordBackup__Enabled: "true"
+      MeetingRecordBackup__LocalPath: /data/meeting-record-backups
+      MeetingRecordBackup__RetryMinutes: 15
     volumes:
       - attachments_data:/data/private-uploads
+      - meeting_record_backups:/data/meeting-record-backups
     expose:
       - "8080"
     networks:
@@ -311,6 +315,8 @@ volumes:
     name: chuchai_postgres_data
   attachments_data:
     name: chuchai_attachments_data
+  meeting_record_backups:
+    name: chuchai_meeting_record_backups
 ```
 
 这个生产文件具备以下特征：
@@ -568,6 +574,7 @@ $compose_cmd up -d
 
 - PostgreSQL 逻辑备份；
 - `chuchai_attachments_data` 卷；
+- `chuchai_meeting_record_backups` 卷；
 - 当前部署代码版本号；
 - 安全保存的 `.env` 或等价密钥记录。
 
@@ -604,17 +611,31 @@ sudo docker run --rm \
   sh -c 'cd /data && tar czf /backup/attachments.tar.gz .'
 ```
 
-### 13.6 保存版本和校验信息
+### 13.6 备份会议记录周期备份卷
+
+先备份会议记录周期备份卷：
+
+```bash
+sudo docker run --rm \
+  --mount type=volume,src=chuchai_meeting_record_backups,dst=/data,readonly \
+  --mount type=bind,src="$backup_dir",dst=/backup \
+  alpine:3.20 \
+  sh -c 'cd /data && tar czf /backup/meeting-record-backups.tar.gz .'
+```
+
+应用会永久保留该卷中的周备份，但仍应把备份包复制到其他服务器或对象存储，以防宿主机或磁盘损坏。
+
+### 13.7 保存版本和校验信息
 
 ```bash
 git rev-parse HEAD > "$backup_dir/git-commit.txt" 2>/dev/null || true
-(cd "$backup_dir" && sha256sum postgres.dump attachments.tar.gz > SHA256SUMS)
+(cd "$backup_dir" && sha256sum postgres.dump attachments.tar.gz meeting-record-backups.tar.gz > SHA256SUMS)
 ls -lh "$backup_dir"
 ```
 
 `.env` 包含数据库密码、JWT 密钥和管理员初始化密码，不建议直接复制到普通备份目录。应保存在受控密码库、加密备份或独立密钥管理系统中。
 
-### 13.7 恢复服务
+### 13.8 恢复服务
 
 ```bash
 $compose_cmd up -d api web
@@ -625,13 +646,14 @@ curl -fsS http://127.0.0.1:8088/health
 
 ## 14. 恢复
 
-恢复会覆盖目标数据库和附件卷，属于破坏性操作。执行前必须确认：
+恢复会覆盖目标数据库、附件卷和会议记录备份卷，属于破坏性操作。执行前必须确认：
 
 - 当前目录是 `/opt/chuchai`；
 - Compose 项目是 `chuchai`；
 - 目标数据库名与 `.env` 一致；
 - 目标附件卷是 `chuchai_attachments_data`；
-- `postgres.dump` 与 `attachments.tar.gz` 来自同一批次；
+- 目标会议记录备份卷是 `chuchai_meeting_record_backups`；
+- `postgres.dump`、`attachments.tar.gz` 与 `meeting-record-backups.tar.gz` 来自同一批次；
 - 已为当前状态额外创建一份备份。
 
 ### 14.1 停止写入
@@ -682,6 +704,17 @@ sudo docker run --rm \
 ```
 
 不要把 `/var/lib/docker`、项目目录或未知宿主机目录作为清理目标。
+
+使用同样的边界恢复会议记录备份卷：
+
+```bash
+sudo docker volume inspect chuchai_meeting_record_backups
+sudo docker run --rm \
+  --mount type=volume,src=chuchai_meeting_record_backups,dst=/data \
+  --mount type=bind,src="$backup_dir",dst=/backup,readonly \
+  alpine:3.20 \
+  sh -c 'find /data -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && tar xzf /backup/meeting-record-backups.tar.gz -C /data'
+```
 
 ### 14.5 启动和验收
 
@@ -840,8 +873,8 @@ $compose_cmd logs --since=30m api | grep '<traceId>'
 - [ ] 公网只开放必要的 `22/80/443`；
 - [ ] 已启用 HTTPS；
 - [ ] 两层 Nginx 的上传限制均至少为 12MB；
-- [ ] `chuchai_postgres_data` 和 `chuchai_attachments_data` 均存在；
-- [ ] 已完成数据库和附件同批次备份；
+- [ ] `chuchai_postgres_data`、`chuchai_attachments_data` 和 `chuchai_meeting_record_backups` 均存在；
+- [ ] 已完成数据库、附件和会议记录备份卷同批次备份；
 - [ ] 已在其他位置保存备份副本；
 - [ ] 已完成管理员登录、项目、报销、附件预览、审批和发放验收；
 - [ ] 运维人员知道不能执行 `docker compose down -v` 和 `docker volume prune`。

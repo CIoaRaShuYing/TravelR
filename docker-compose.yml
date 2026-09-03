@@ -33,8 +33,12 @@ services:
       BootstrapAdmin__Password: ${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD in .env}
       FileStorage__LocalPath: /data/private-uploads
       FileStorage__StagedRetentionHours: 24
+      MeetingRecordBackup__Enabled: "true"
+      MeetingRecordBackup__LocalPath: /data/meeting-record-backups
+      MeetingRecordBackup__RetryMinutes: 15
     volumes:
       - attachments_data:/data/private-uploads
+      - meeting_record_backups:/data/meeting-record-backups
     ports:
       - "8080:8080"
 
@@ -49,3 +53,4 @@ services:
 volumes:
   postgres_data:
   attachments_data:
+  meeting_record_backups:

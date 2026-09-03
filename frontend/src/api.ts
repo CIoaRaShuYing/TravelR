@@ -155,6 +155,75 @@ export type WeeklyReport = {
   concurrencyToken: string
 }
 
+export type MeetingRecordProject = { id: string; code: string; name: string; isActive: boolean }
+
+export type MeetingParticipant = {
+  id: string
+  name: string
+  organization?: string | null
+  title?: string | null
+  phone?: string | null
+  sortOrder: number
+}
+
+export type MeetingRecordItem = {
+  id: string
+  content: string
+  status?: string | null
+  dueDate?: string | null
+  owner?: string | null
+  sortOrder: number
+}
+
+export type MeetingRecordListRow = {
+  id: string
+  projectId: string
+  projectCode: string
+  projectName: string
+  meetingDate: string
+  location: string
+  participantCount: number
+  requirementCount: number
+  workFocusCount: number
+  firstItemContent?: string | null
+  createdById: string
+  createdByDisplayName: string
+  lastEditedById: string
+  lastEditedByDisplayName: string
+  createdAt: string
+  updatedAt: string
+  concurrencyToken: string
+}
+
+export type MeetingRecordDetail = {
+  id: string
+  projectId: string
+  projectCode: string
+  projectName: string
+  projectIsActive: boolean
+  meetingDate: string
+  location: string
+  participants: MeetingParticipant[]
+  requirements: MeetingRecordItem[]
+  workFocuses: MeetingRecordItem[]
+  createdById: string
+  createdByDisplayName: string
+  lastEditedById: string
+  lastEditedByDisplayName: string
+  createdAt: string
+  updatedAt: string
+  concurrencyToken: string
+}
+
+export type MeetingRecordPayload = {
+  projectId: string
+  meetingDate: string
+  location: string
+  participants: Array<{ name: string; organization?: string; title?: string; phone?: string }>
+  requirements: Array<{ content: string; status?: string; dueDate?: string; owner?: string }>
+  workFocuses: Array<{ content: string; status?: string; dueDate?: string; owner?: string }>
+}
+
 export type ClaimVersionSummary = {
   id: string
   versionNumber: number
@@ -332,6 +401,13 @@ export const api = {
   exportAdminWeeklyReports: (filters: { projectId?: string; authorId?: string; weekFrom?: string; weekTo?: string }) => download(`/admin/weekly-reports/export.xlsx${queryString(filters)}`),
   createWeeklyReport: (body: { projectId: string; weekStart: string; completedWork: string; nextWeekPlan: string; issues?: string }) => request<WeeklyReport>('/weekly-reports', { method: 'POST', body: JSON.stringify(body) }),
   updateWeeklyReport: (id: string, body: { projectId: string; weekStart: string; completedWork: string; nextWeekPlan: string; issues?: string; concurrencyToken: string }) => request<WeeklyReport>(`/weekly-reports/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  listMeetingRecordProjects: () => request<MeetingRecordProject[]>('/meeting-records/projects'),
+  listMeetingRecords: (filters: { projectId?: string; dateFrom?: string; dateTo?: string; page?: number; pageSize?: number }) => request<PagedResult<MeetingRecordListRow>>(`/meeting-records${queryString(filters)}`),
+  getMeetingRecord: (id: string) => request<MeetingRecordDetail>(`/meeting-records/${id}`),
+  createMeetingRecord: (body: MeetingRecordPayload) => request<MeetingRecordDetail>('/meeting-records', { method: 'POST', body: JSON.stringify(body) }),
+  updateMeetingRecord: (id: string, body: MeetingRecordPayload & { concurrencyToken: string }) => request<MeetingRecordDetail>(`/meeting-records/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteMeetingRecord: (id: string, concurrencyToken: string) => request<void>(`/admin/meeting-records/${id}${queryString({ concurrencyToken })}`, { method: 'DELETE' }),
+  exportMeetingRecords: (projectId: string) => download(`/meeting-records/export.xlsx${queryString({ projectId })}`),
   getAdminSettings: () => request<{ registrationMode: RegistrationMode; updatedAt: string }>('/admin/registration-settings'),
   updateAdminSettings: (registrationMode: RegistrationMode) => request<{ registrationMode: RegistrationMode; updatedAt: string }>('/admin/registration-settings', { method: 'PUT', body: JSON.stringify({ registrationMode }) }),
   listRegistrationRequests: (filters: { status?: RegistrationRequestStatus; page?: number; pageSize?: number }) => request<PagedResult<RegistrationRequest>>(`/admin/registration-requests${queryString(filters)}`),
@@ -364,6 +440,8 @@ export const api = {
     if (data.code === 'LAST_ADMIN_DISABLE') return '不能停用最后一个启用的管理员账户。'
     if (data.code === 'PASSWORD_INCORRECT') return '原密码不正确。'
     if (data.code === 'PASSWORD_UNCHANGED') return '新密码不能与原密码相同。'
+    if (data.code === 'MEETING_RECORD_STALE') return '会议记录已被其他用户修改或删除，请刷新后重试。'
+    if (data.code === 'MEETING_RECORD_EXPORT_EMPTY') return '所选项目暂无可导出的会议记录。'
     if (data.code === 'USER_INACTIVE_ROLE_CHANGE') return '停用用户不能设为管理员。'
     if (data.code === 'USER_SELF_ADMIN_REVOKE') return '不能取消当前登录账户的管理员角色。'
     if (data.code === 'SUPER_ADMIN_ROLE_REQUIRED') return '超级管理员账号不能取消管理员角色。'

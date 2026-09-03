@@ -19,4 +19,21 @@ public sealed class BusinessModelTests
 
         Assert.Equal(new[] { nameof(WeeklyReport.AuthorId), nameof(WeeklyReport.ProjectId), nameof(WeeklyReport.WeekStart) }, uniqueIndex.Properties.Select(property => property.Name));
     }
+
+    [Fact]
+    public void Meeting_records_allow_multiple_entries_for_same_project_and_date()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseNpgsql("Host=localhost;Database=model_only;Username=model_only;Password=model_only")
+            .Options;
+        using var db = new AppDbContext(options);
+
+        var entity = db.Model.FindEntityType(typeof(MeetingRecord));
+
+        Assert.NotNull(entity);
+        Assert.DoesNotContain(entity!.GetIndexes(), index => index.IsUnique);
+        Assert.NotNull(entity.GetQueryFilter());
+        Assert.NotNull(db.Model.FindEntityType(typeof(MeetingParticipant))!.GetQueryFilter());
+        Assert.NotNull(db.Model.FindEntityType(typeof(MeetingRecordItem))!.GetQueryFilter());
+    }
 }
