@@ -115,16 +115,14 @@ public sealed record CreateMeetingRecordRequest(
     DateOnly MeetingDate,
     [property: Required, StringLength(200)] string Location,
     IReadOnlyList<MeetingParticipantRequest> Participants,
-    IReadOnlyList<MeetingRecordItemRequest> Requirements,
-    IReadOnlyList<MeetingRecordItemRequest> WorkFocuses);
+    IReadOnlyList<MeetingRecordItemRequest> Items);
 
 public sealed record UpdateMeetingRecordRequest(
     Guid ProjectId,
     DateOnly MeetingDate,
     [property: Required, StringLength(200)] string Location,
     IReadOnlyList<MeetingParticipantRequest> Participants,
-    IReadOnlyList<MeetingRecordItemRequest> Requirements,
-    IReadOnlyList<MeetingRecordItemRequest> WorkFocuses,
+    IReadOnlyList<MeetingRecordItemRequest> Items,
     Guid ConcurrencyToken);
 
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, int Total);

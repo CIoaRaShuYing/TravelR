@@ -183,8 +183,7 @@ export type MeetingRecordListRow = {
   meetingDate: string
   location: string
   participantCount: number
-  requirementCount: number
-  workFocusCount: number
+  itemCount: number
   firstItemContent?: string | null
   createdById: string
   createdByDisplayName: string
@@ -204,8 +203,7 @@ export type MeetingRecordDetail = {
   meetingDate: string
   location: string
   participants: MeetingParticipant[]
-  requirements: MeetingRecordItem[]
-  workFocuses: MeetingRecordItem[]
+  items: MeetingRecordItem[]
   createdById: string
   createdByDisplayName: string
   lastEditedById: string
@@ -220,8 +218,7 @@ export type MeetingRecordPayload = {
   meetingDate: string
   location: string
   participants: Array<{ name: string; organization?: string; title?: string; phone?: string }>
-  requirements: Array<{ content: string; status?: string; dueDate?: string; owner?: string }>
-  workFocuses: Array<{ content: string; status?: string; dueDate?: string; owner?: string }>
+  items: Array<{ content: string; status?: string; dueDate?: string; owner?: string }>
 }
 
 export type ClaimVersionSummary = {

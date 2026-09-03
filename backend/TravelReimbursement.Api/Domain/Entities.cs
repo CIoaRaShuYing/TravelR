@@ -13,7 +13,6 @@ public enum MealAllowanceStatus { Draft, PendingTravelReview, PendingReview, App
 public enum ExpenseCategory { DepartureTransport, ReturnTransport, Lodging, OfficeSupplies, Meal, Other, Unspecified }
 public enum AttachmentScanStatus { Pending, Accepted, Rejected }
 public enum AttachmentBindingStatus { Staged, Bound }
-public enum MeetingRecordItemKind { Requirement, WorkFocus }
 
 public sealed class AppUser : IdentityUser<Guid>
 {
@@ -306,7 +305,6 @@ public sealed class MeetingRecordItem
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid MeetingRecordId { get; set; }
     public MeetingRecord MeetingRecord { get; set; } = null!;
-    public MeetingRecordItemKind Kind { get; set; }
     public int SortOrder { get; set; }
     public string Content { get; set; } = string.Empty;
     public string? Status { get; set; }

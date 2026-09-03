@@ -34,6 +34,10 @@ public sealed class BusinessModelTests
         Assert.DoesNotContain(entity!.GetIndexes(), index => index.IsUnique);
         Assert.NotNull(entity.GetQueryFilter());
         Assert.NotNull(db.Model.FindEntityType(typeof(MeetingParticipant))!.GetQueryFilter());
-        Assert.NotNull(db.Model.FindEntityType(typeof(MeetingRecordItem))!.GetQueryFilter());
+        var itemEntity = db.Model.FindEntityType(typeof(MeetingRecordItem))!;
+        Assert.NotNull(itemEntity.GetQueryFilter());
+        Assert.Null(itemEntity.FindProperty("Kind"));
+        var itemOrderIndex = itemEntity.GetIndexes().Single(index => index.IsUnique);
+        Assert.Equal(new[] { nameof(MeetingRecordItem.MeetingRecordId), nameof(MeetingRecordItem.SortOrder) }, itemOrderIndex.Properties.Select(property => property.Name));
     }
 }

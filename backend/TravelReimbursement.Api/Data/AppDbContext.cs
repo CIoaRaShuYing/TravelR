@@ -217,8 +217,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         builder.Entity<MeetingRecordItem>(entity =>
         {
             entity.HasQueryFilter(x => x.MeetingRecord.DeletedAt == null);
-            entity.HasIndex(x => new { x.MeetingRecordId, x.Kind, x.SortOrder }).IsUnique();
-            entity.Property(x => x.Kind).HasConversion<string>().HasMaxLength(32);
+            entity.HasIndex(x => new { x.MeetingRecordId, x.SortOrder }).IsUnique();
             entity.Property(x => x.Content).HasMaxLength(4000);
             entity.Property(x => x.Status).HasMaxLength(100);
             entity.Property(x => x.Owner).HasMaxLength(100);

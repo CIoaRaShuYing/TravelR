@@ -62,7 +62,7 @@ public sealed class MeetingRecordBackupService(
                     .ToListAsync(cancellationToken);
 
                 document = new MeetingRecordBackupDocument(
-                    "meeting-records.v1",
+                    "meeting-records.v2",
                     capturedAtUtc,
                     records.Select(ToBackupRecord).ToArray());
                 await transaction.CommitAsync(cancellationToken);
@@ -71,15 +71,15 @@ public sealed class MeetingRecordBackupService(
             var data = JsonSerializer.SerializeToUtf8Bytes(document, JsonOptions);
             var dataHash = Sha256(data);
             var manifest = JsonSerializer.SerializeToUtf8Bytes(new MeetingRecordBackupManifest(
-                "meeting-records-backup-manifest.v1",
+                "meeting-records-backup-manifest.v2",
                 slot.WeekStart,
                 slot.ScheduledDate,
                 slot.ScheduledForUtc,
                 capturedAtUtc,
                 document.Records.Count,
-                "meeting-records.v1.json",
+                "meeting-records.v2.json",
                 dataHash), JsonOptions);
-            var checksums = Encoding.UTF8.GetBytes($"{Sha256(manifest)}  manifest.json\n{dataHash}  meeting-records.v1.json\n");
+            var checksums = Encoding.UTF8.GetBytes($"{Sha256(manifest)}  manifest.json\n{dataHash}  meeting-records.v2.json\n");
 
             await WriteArchiveAsync(temporaryPath, manifest, data, checksums, cancellationToken);
             ValidateArchive(temporaryPath);
@@ -147,10 +147,10 @@ public sealed class MeetingRecordBackupService(
     {
         using var archive = ZipFile.OpenRead(path);
         var manifest = ReadRequiredEntry(archive, "manifest.json");
-        var data = ReadRequiredEntry(archive, "meeting-records.v1.json");
+        var data = ReadRequiredEntry(archive, "meeting-records.v2.json");
         var checksums = Encoding.UTF8.GetString(ReadRequiredEntry(archive, "checksums.sha256"));
         if (!checksums.Contains($"{Sha256(manifest)}  manifest.json", StringComparison.Ordinal)
-            || !checksums.Contains($"{Sha256(data)}  meeting-records.v1.json", StringComparison.Ordinal))
+            || !checksums.Contains($"{Sha256(data)}  meeting-records.v2.json", StringComparison.Ordinal))
             throw new InvalidDataException("会议记录备份校验和不匹配。");
     }
 
@@ -174,8 +174,7 @@ public sealed class MeetingRecordBackupService(
         record.Participants.OrderBy(participant => participant.SortOrder)
             .Select(participant => new MeetingParticipantBackupEntry(participant.Id, participant.SortOrder, participant.Name, participant.Organization, participant.Title, participant.Phone))
             .ToArray(),
-        record.Items.Where(item => item.Kind == MeetingRecordItemKind.Requirement).OrderBy(item => item.SortOrder).Select(ToBackupItem).ToArray(),
-        record.Items.Where(item => item.Kind == MeetingRecordItemKind.WorkFocus).OrderBy(item => item.SortOrder).Select(ToBackupItem).ToArray());
+        record.Items.OrderBy(item => item.SortOrder).Select(ToBackupItem).ToArray());
 
     private static MeetingRecordItemBackupEntry ToBackupItem(MeetingRecordItem item) =>
         new(item.Id, item.SortOrder, item.Content, item.Status, item.DueDate, item.Owner);
@@ -281,8 +280,7 @@ internal sealed record MeetingRecordBackupEntry(
     DateTimeOffset? DeletedAt,
     Guid ConcurrencyToken,
     IReadOnlyList<MeetingParticipantBackupEntry> Participants,
-    IReadOnlyList<MeetingRecordItemBackupEntry> Requirements,
-    IReadOnlyList<MeetingRecordItemBackupEntry> WorkFocuses);
+    IReadOnlyList<MeetingRecordItemBackupEntry> Items);
 
 internal sealed record MeetingParticipantBackupEntry(Guid Id, int SortOrder, string Name, string? Organization, string? Title, string? Phone);
 internal sealed record MeetingRecordItemBackupEntry(Guid Id, int SortOrder, string Content, string? Status, DateOnly? DueDate, string? Owner);

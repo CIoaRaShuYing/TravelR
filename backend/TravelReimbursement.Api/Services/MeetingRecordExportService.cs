@@ -43,9 +43,7 @@ public sealed class MeetingRecordExportService(AppDbContext db)
             record.Participants.OrderBy(participant => participant.SortOrder)
                 .Select(participant => new MeetingParticipantExportData(participant.Name, participant.Organization, participant.Title, participant.Phone))
                 .ToArray(),
-            record.Items.Where(item => item.Kind == MeetingRecordItemKind.Requirement).OrderBy(item => item.SortOrder)
-                .Select(ToItem).ToArray(),
-            record.Items.Where(item => item.Kind == MeetingRecordItemKind.WorkFocus).OrderBy(item => item.SortOrder)
+            record.Items.OrderBy(item => item.SortOrder)
                 .Select(ToItem).ToArray()))
             .ToArray();
 
@@ -71,8 +69,7 @@ internal sealed record MeetingRecordExportData(
     string Location,
     DateTimeOffset CreatedAt,
     IReadOnlyList<MeetingParticipantExportData> Participants,
-    IReadOnlyList<MeetingRecordItemExportData> Requirements,
-    IReadOnlyList<MeetingRecordItemExportData> WorkFocuses);
+    IReadOnlyList<MeetingRecordItemExportData> Items);
 
 internal sealed record MeetingParticipantExportData(string Name, string? Organization, string? Title, string? Phone);
 internal sealed record MeetingRecordItemExportData(string Content, string? Status, DateOnly? DueDate, string? Owner);
@@ -121,48 +118,48 @@ internal static class MeetingRecordWorkbookWriter
         AddMergedRow(rows, merges, "会议记录", 1, 1, 9, 30);
 
         var dateLocation = NewCells(3);
-        Set(dateLocation, 1, "日期", 2);
-        Set(dateLocation, 2, record.MeetingDate.ToString("yyyy年MM月dd日", CultureInfo.InvariantCulture), 3);
-        Set(dateLocation, 4, "地点", 2);
-        Set(dateLocation, 5, record.Location, 3);
+        Set(dateLocation, 1, "会议时间", 2);
+        Set(dateLocation, 3, record.MeetingDate.ToString("yyyy年MM月dd日", CultureInfo.InvariantCulture), 3);
+        Set(dateLocation, 5, "会议地点", 2);
+        Set(dateLocation, 8, record.Location, 3);
         rows.Add(new MeetingRecordSheetRow(24, dateLocation));
-        merges.Add($"B{rows.Count}:C{rows.Count}");
-        merges.Add($"E{rows.Count}:I{rows.Count}");
+        AddMetadataMerges(merges, rows.Count);
 
         AddMergedRow(rows, merges, "参会人员", 2, 1, 9, 23);
-        rows.Add(HeaderRow("姓名", "单位", "职务", "联系电话"));
-        AddFourColumnMerges(merges, rows.Count);
+        rows.Add(ParticipantHeaderRow());
+        AddParticipantMerges(merges, rows.Count);
+        var participantNumber = 0;
         foreach (var participant in Pad(record.Participants, 3))
         {
             var cells = NewCells(3);
             if (participant is not null)
             {
-                Set(cells, 1, participant.Name, 3);
-                Set(cells, 3, participant.Organization, 3);
+                participantNumber++;
+                Set(cells, 1, participantNumber.ToString(CultureInfo.InvariantCulture), 3);
+                Set(cells, 3, participant.Name, 3);
+                Set(cells, 4, participant.Organization, 3);
                 Set(cells, 5, participant.Title, 3);
                 Set(cells, 8, participant.Phone, 3);
             }
             rows.Add(new MeetingRecordSheetRow(EstimateHeight(participant is null ? null : string.Join(' ', participant.Name, participant.Organization, participant.Title, participant.Phone), 30, 23), cells));
-            AddFourColumnMerges(merges, rows.Count);
+            AddParticipantMerges(merges, rows.Count);
         }
 
         AddMergedRow(rows, merges, "会议内容摘要", 2, 1, 9, 23);
-        AddItems(rows, merges, "需求内容", record.Requirements, 1);
-        AddItems(rows, merges, "工作重点", record.WorkFocuses, 3);
+        AddItems(rows, merges, record.Items, 4);
         return new MeetingRecordSheet(name, rows, merges);
     }
 
     private static void AddItems(
         ICollection<MeetingRecordSheetRow> rows,
         ICollection<string> merges,
-        string category,
         IReadOnlyList<MeetingRecordItemExportData> items,
         int minimumRows)
     {
         var header = NewCells(2);
-        Set(header, 1, category, 2);
+        Set(header, 1, "需求内容", 2);
         Set(header, 6, "状态", 2);
-        Set(header, 7, "完成时间", 2);
+        Set(header, 7, "截止时间", 2);
         Set(header, 9, "负责人", 2);
         rows.Add(new MeetingRecordSheetRow(23, header));
         AddItemMerges(merges, rows.Count);
@@ -182,13 +179,14 @@ internal static class MeetingRecordWorkbookWriter
         }
     }
 
-    private static MeetingRecordSheetRow HeaderRow(string first, string second, string third, string fourth)
+    private static MeetingRecordSheetRow ParticipantHeaderRow()
     {
         var cells = NewCells(2);
-        Set(cells, 1, first, 2);
-        Set(cells, 3, second, 2);
-        Set(cells, 5, third, 2);
-        Set(cells, 8, fourth, 2);
+        Set(cells, 1, "序号", 2);
+        Set(cells, 3, "姓名", 2);
+        Set(cells, 4, "单位", 2);
+        Set(cells, 5, "职务", 2);
+        Set(cells, 8, "电话", 2);
         return new MeetingRecordSheetRow(23, cells);
     }
 
@@ -220,10 +218,17 @@ internal static class MeetingRecordWorkbookWriter
         return Math.Min(120, Math.Max(minimum, lines * 17 + 8));
     }
 
-    private static void AddFourColumnMerges(ICollection<string> merges, int row)
+    private static void AddMetadataMerges(ICollection<string> merges, int row)
     {
         merges.Add($"A{row}:B{row}");
         merges.Add($"C{row}:D{row}");
+        merges.Add($"E{row}:G{row}");
+        merges.Add($"H{row}:I{row}");
+    }
+
+    private static void AddParticipantMerges(ICollection<string> merges, int row)
+    {
+        merges.Add($"A{row}:B{row}");
         merges.Add($"E{row}:G{row}");
         merges.Add($"H{row}:I{row}");
     }

@@ -17,9 +17,9 @@
 ## AC-003 动态结构化内容
 
 - Requirement: REQ-005
-- Acceptance criteria: 表单可增加、删除和调整参会人员、需求内容、工作重点；保存后再次打开时字段和顺序保持一致；必填和长度校验返回明确错误。
+- Acceptance criteria: 表单可增加、删除和调整参会人员及统一会议事项；保存后再次打开时字段和顺序保持一致；必填和长度校验返回明确错误。
 - Verification method: API 数据往返测试和前端交互测试。
-- Test data: 5 名参会人员、2 条需求、4 条工作重点。
+- Test data: 5 名参会人员、6 条会议事项。
 - Status: confirmed
 
 ## AC-004 并发保护与审计
@@ -46,7 +46,7 @@
 ## AC-007 模板与打印样式
 
 - Requirement: REQ-006
-- Acceptance criteria: 导出包含参考文件中的标题、会议时间/地点、参会人员、会议内容摘要、需求内容、工作重点；使用粗边框和合并区域；A4 纵向打印；动态行完整且长文本自动换行。
+- Acceptance criteria: 导出包含参考文件中的标题、会议时间/地点、参会人员和会议内容摘要统一事项表；事项列为需求内容、状态、截止时间、负责人；使用粗边框和合并区域；A4 纵向打印；动态行完整且长文本自动换行。
 - Verification method: `officecli validate`、`officecli view issues`、HTML 预览和 Excel/WPS 人工抽检。
 - Status: confirmed
 

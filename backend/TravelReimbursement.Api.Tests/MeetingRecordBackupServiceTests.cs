@@ -45,15 +45,15 @@ public sealed class MeetingRecordBackupServiceTests
     public void Archive_validation_accepts_matching_manifest_data_and_checksums()
     {
         var path = Path.Combine(Path.GetTempPath(), $"meeting-backup-{Guid.NewGuid():N}.zip");
-        var manifest = "{\"formatVersion\":\"meeting-records-backup-manifest.v1\"}"u8.ToArray();
-        var data = "{\"formatVersion\":\"meeting-records.v1\",\"records\":[]}"u8.ToArray();
+        var manifest = "{\"formatVersion\":\"meeting-records-backup-manifest.v2\"}"u8.ToArray();
+        var data = "{\"formatVersion\":\"meeting-records.v2\",\"records\":[]}"u8.ToArray();
         try
         {
             using (var archive = ZipFile.Open(path, ZipArchiveMode.Create))
             {
                 WriteEntry(archive, "manifest.json", manifest);
-                WriteEntry(archive, "meeting-records.v1.json", data);
-                WriteEntry(archive, "checksums.sha256", Encoding.UTF8.GetBytes($"{Hash(manifest)}  manifest.json\n{Hash(data)}  meeting-records.v1.json\n"));
+                WriteEntry(archive, "meeting-records.v2.json", data);
+                WriteEntry(archive, "checksums.sha256", Encoding.UTF8.GetBytes($"{Hash(manifest)}  manifest.json\n{Hash(data)}  meeting-records.v2.json\n"));
             }
 
             MeetingRecordBackupService.ValidateArchive(path);

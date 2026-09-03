@@ -31,12 +31,12 @@
 
 ### MeetingRecordItem
 
-- `Id Guid`、`MeetingRecordId Guid`、`Kind MeetingRecordItemKind`、`SortOrder int`
+- `Id Guid`、`MeetingRecordId Guid`、`SortOrder int`
 - `Content string(4000)` 必填
 - `Status string(100)?`
 - `DueDate DateOnly?`
 - `Owner string(100)?`
-- 唯一索引 `(MeetingRecordId, Kind, SortOrder)`
+- 唯一索引 `(MeetingRecordId, SortOrder)`
 
 ## API 合同
 
@@ -47,7 +47,7 @@
 - `DELETE /api/admin/meeting-records/{id}?concurrencyToken=`：管理员软删除。
 - `GET /api/meeting-records/export.xlsx?projectId=`：导出项目全部活跃记录。
 
-创建/编辑 DTO 使用 `Participants`、`Requirements`、`WorkFocuses` 三个数组。参会人姓名和事项内容必填；单位、职务、电话、状态、截止日期和负责人可空。项目、日期、地点必填；至少一名参会人且两类事项合计至少一条。每类数组上限 100，防止异常请求。
+创建/编辑 DTO 使用 `Participants`、`Items` 两个数组。参会人姓名和事项内容必填；单位、职务、电话、状态、截止日期和负责人可空。项目、日期、地点必填；至少一名参会人和一条会议事项。每个数组上限 100，防止异常请求。
 
 ## 服务边界
 
@@ -67,8 +67,8 @@
 ## Excel 版式
 
 - 固定 9 列，列宽比例参考模板。
-- 标题、会议日期/地点、参会人员、会议内容摘要、需求内容、工作重点均使用独立分区。
-- 参会人员、需求、工作重点行数分别至少为 3、1、3，超出时动态扩展。
+- 标题、会议日期/地点、参会人员、会议内容摘要使用独立分区；摘要下只有一张统一事项表。
+- 参会人员至少预留 3 行，会议事项至少预留 4 行，超出时动态扩展。
 - 所有表格使用黑色中粗边框；表头黑体粗体居中；正文宋体；内容自动换行。
 - 工作簿名：`会议记录_{项目编码}_{yyyyMMddHHmmss}.xlsx`。
 - 工作表名：`yyyyMMdd-NN`，过滤非法字符并保证 31 字符以内和大小写不重复。
@@ -90,7 +90,7 @@
 最终文件：`YYYY/meeting-records-full-week-YYYY-MM-DD.zip`，日期为备份周期周一。ZIP 包含：
 
 - `manifest.json`：格式版本、备份 ID、周期、计划时间、捕获时间、数量和触发方式。
-- `meeting-records.v1.json`：稳定排序的全部记录、项目快照、用户显示信息、子项和软删除元数据。
+- `meeting-records.v2.json`：稳定排序的全部记录、项目快照、用户显示信息、统一事项列表和软删除元数据。
 - `checksums.sha256`：manifest 和数据文件的 SHA-256。
 
 备份不包含密码、JWT、银行卡、报销或附件数据。成功文件禁止覆盖、禁止应用自动删除。
@@ -99,13 +99,13 @@
 
 - `MeetingRecordsView.vue`：共享列表、筛选、分页、导出弹窗、管理员删除。
 - `MeetingRecordEditorDialog.vue`：大型滚动弹窗和动态表单。
-- 列表概览显示日期、项目、地点、参会人数、需求数、重点数、创建人和最后编辑。
+- 列表概览显示日期、项目、地点、参会人数、事项数、创建人和最后编辑。
 - 移动端使用现有记录列表样式；重复项在窄屏切换为单列。
 - 冲突时保留输入，显示 `el-alert` 和“重新加载最新内容”操作。
 
 ## 迁移与部署
 
-- 新增迁移 `AddProjectMeetingRecords`，只创建新表、索引和约束，无历史数据回填。
+- 初始迁移 `AddProjectMeetingRecords` 创建新表、索引和约束；后续迁移 `UnifyMeetingRecordItems` 合并旧分类顺序并删除 `Kind` 字段。
 - `appsettings.json` 增加开发默认备份目录。
 - Docker Compose 增加 `/data/meeting-record-backups` 挂载和 `meeting_record_backups` 卷。
 - Linux 部署手册增加卷检查、备份、恢复、容量监控和禁止误删说明。

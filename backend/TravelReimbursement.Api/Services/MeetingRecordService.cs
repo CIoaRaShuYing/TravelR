@@ -39,9 +39,8 @@ public sealed class MeetingRecordService(AppDbContext db)
                 record.MeetingDate,
                 record.Location,
                 record.Participants.Count,
-                record.Items.Count(item => item.Kind == MeetingRecordItemKind.Requirement),
-                record.Items.Count(item => item.Kind == MeetingRecordItemKind.WorkFocus),
-                record.Items.OrderBy(item => item.Kind).ThenBy(item => item.SortOrder).Select(item => item.Content).FirstOrDefault(),
+                record.Items.Count,
+                record.Items.OrderBy(item => item.SortOrder).Select(item => item.Content).FirstOrDefault(),
                 record.CreatedById,
                 record.CreatedBy.DisplayName,
                 record.LastEditedById,
@@ -66,7 +65,7 @@ public sealed class MeetingRecordService(AppDbContext db)
         string? traceId,
         CancellationToken cancellationToken)
     {
-        var input = Normalize(request.ProjectId, request.MeetingDate, request.Location, request.Participants, request.Requirements, request.WorkFocuses);
+        var input = Normalize(request.ProjectId, request.MeetingDate, request.Location, request.Participants, request.Items);
         var projectExists = await db.Projects.AnyAsync(project => project.Id == input.ProjectId && project.IsActive, cancellationToken);
         if (!projectExists) throw Validation("projectId", "请选择有效的启用项目。");
 
@@ -78,7 +77,7 @@ public sealed class MeetingRecordService(AppDbContext db)
             CreatedById = actorId,
             LastEditedById = actorId,
             Participants = CreateParticipants(input.Participants),
-            Items = CreateItems(input.Requirements, input.WorkFocuses)
+            Items = CreateItems(input.Items)
         };
         db.MeetingRecords.Add(record);
         AddAudit(actorId, "MeetingRecordCreated", record.Id, traceId, record, input);
@@ -96,7 +95,7 @@ public sealed class MeetingRecordService(AppDbContext db)
         var record = await LoadAsync(id, asTracking: true, cancellationToken)
             ?? throw new ApiProblemException(StatusCodes.Status404NotFound, "MEETING_RECORD_NOT_FOUND", "会议记录不存在或已删除。");
         EnsureCurrent(record, request.ConcurrencyToken);
-        var input = Normalize(request.ProjectId, request.MeetingDate, request.Location, request.Participants, request.Requirements, request.WorkFocuses);
+        var input = Normalize(request.ProjectId, request.MeetingDate, request.Location, request.Participants, request.Items);
 
         var project = await db.Projects.SingleOrDefaultAsync(candidate => candidate.Id == input.ProjectId, cancellationToken);
         if (project is null || (!project.IsActive && project.Id != record.ProjectId))
@@ -109,8 +108,7 @@ public sealed class MeetingRecordService(AppDbContext db)
         record.UpdatedAt = DateTimeOffset.UtcNow;
         record.ConcurrencyToken = Guid.NewGuid();
         SyncParticipants(record, input.Participants);
-        SyncItems(record, MeetingRecordItemKind.Requirement, input.Requirements);
-        SyncItems(record, MeetingRecordItemKind.WorkFocus, input.WorkFocuses);
+        SyncItems(record, input.Items);
         AddAudit(actorId, "MeetingRecordUpdated", record.Id, traceId, record, input);
         await SaveChangesAsync(cancellationToken);
         return (await GetAsync(record.Id, cancellationToken))!;
@@ -149,20 +147,16 @@ public sealed class MeetingRecordService(AppDbContext db)
         DateOnly meetingDate,
         string? location,
         IReadOnlyList<MeetingParticipantRequest>? participants,
-        IReadOnlyList<MeetingRecordItemRequest>? requirements,
-        IReadOnlyList<MeetingRecordItemRequest>? workFocuses)
+        IReadOnlyList<MeetingRecordItemRequest>? items)
     {
         var errors = new Dictionary<string, string[]>();
         if (projectId == Guid.Empty) errors["projectId"] = ["请选择项目。"];
         if (meetingDate == default) errors["meetingDate"] = ["请选择会议日期。"];
         var normalizedLocation = NormalizeRequired(location, 200, "会议地点", errors, "location");
         participants ??= [];
-        requirements ??= [];
-        workFocuses ??= [];
+        items ??= [];
         if (participants.Count is < 1 or > 100) errors["participants"] = ["参会人员数量必须在 1 到 100 之间。"];
-        if (requirements.Count > 100) errors["requirements"] = ["需求内容不能超过 100 条。"];
-        if (workFocuses.Count > 100) errors["workFocuses"] = ["工作重点不能超过 100 条。"];
-        if (requirements.Count + workFocuses.Count < 1) errors["items"] = ["请至少填写一条需求内容或工作重点。"];
+        if (items.Count is < 1 or > 100) errors["items"] = ["会议事项数量必须在 1 到 100 条之间。"];
 
         var normalizedParticipants = participants.Select((participant, index) => new NormalizedMeetingParticipant(
             NormalizeRequired(participant?.Name, 100, $"第 {index + 1} 位参会人员姓名", errors, $"participants[{index}].name"),
@@ -170,12 +164,11 @@ public sealed class MeetingRecordService(AppDbContext db)
             NormalizeOptional(participant?.Title, 100, $"第 {index + 1} 位参会人员职务", errors, $"participants[{index}].title"),
             NormalizeOptional(participant?.Phone, 50, $"第 {index + 1} 位参会人员电话", errors, $"participants[{index}].phone")))
             .ToArray();
-        var normalizedRequirements = NormalizeItems(requirements, "requirements", "需求内容", errors);
-        var normalizedWorkFocuses = NormalizeItems(workFocuses, "workFocuses", "工作重点", errors);
+        var normalizedItems = NormalizeItems(items, errors);
         if (errors.Count > 0)
             throw new ApiProblemException(StatusCodes.Status400BadRequest, "MEETING_RECORD_INVALID", "会议记录内容不完整。", errors);
 
-        return new NormalizedMeetingRecordInput(projectId, meetingDate, normalizedLocation, normalizedParticipants, normalizedRequirements, normalizedWorkFocuses);
+        return new NormalizedMeetingRecordInput(projectId, meetingDate, normalizedLocation, normalizedParticipants, normalizedItems);
     }
 
     private async Task<MeetingRecord?> LoadAsync(Guid id, bool asTracking, CancellationToken cancellationToken)
@@ -200,8 +193,7 @@ public sealed class MeetingRecordService(AppDbContext db)
         record.Location,
         record.Participants.OrderBy(participant => participant.SortOrder).Select(participant => new MeetingParticipantRow(
             participant.Id, participant.Name, participant.Organization, participant.Title, participant.Phone, participant.SortOrder)).ToArray(),
-        record.Items.Where(item => item.Kind == MeetingRecordItemKind.Requirement).OrderBy(item => item.SortOrder).Select(ToItemRow).ToArray(),
-        record.Items.Where(item => item.Kind == MeetingRecordItemKind.WorkFocus).OrderBy(item => item.SortOrder).Select(ToItemRow).ToArray(),
+        record.Items.OrderBy(item => item.SortOrder).Select(ToItemRow).ToArray(),
         record.CreatedById,
         record.CreatedBy.DisplayName,
         record.LastEditedById,
@@ -223,16 +215,11 @@ public sealed class MeetingRecordService(AppDbContext db)
             Phone = participant.Phone
         }).ToList();
 
-    private static List<MeetingRecordItem> CreateItems(
-        IReadOnlyList<NormalizedMeetingRecordItem> requirements,
-        IReadOnlyList<NormalizedMeetingRecordItem> workFocuses) =>
-        requirements.Select((item, index) => CreateItem(MeetingRecordItemKind.Requirement, index, item))
-            .Concat(workFocuses.Select((item, index) => CreateItem(MeetingRecordItemKind.WorkFocus, index, item)))
-            .ToList();
+    private static List<MeetingRecordItem> CreateItems(IReadOnlyList<NormalizedMeetingRecordItem> items) =>
+        items.Select((item, index) => CreateItem(index, item)).ToList();
 
-    private static MeetingRecordItem CreateItem(MeetingRecordItemKind kind, int sortOrder, NormalizedMeetingRecordItem item) => new()
+    private static MeetingRecordItem CreateItem(int sortOrder, NormalizedMeetingRecordItem item) => new()
     {
-        Kind = kind,
         SortOrder = sortOrder,
         Content = item.Content,
         Status = item.Status,
@@ -256,12 +243,12 @@ public sealed class MeetingRecordService(AppDbContext db)
         if (existing.Count > input.Count) db.MeetingParticipants.RemoveRange(existing.Skip(input.Count));
     }
 
-    private void SyncItems(MeetingRecord record, MeetingRecordItemKind kind, IReadOnlyList<NormalizedMeetingRecordItem> input)
+    private void SyncItems(MeetingRecord record, IReadOnlyList<NormalizedMeetingRecordItem> input)
     {
-        var existing = record.Items.Where(item => item.Kind == kind).OrderBy(item => item.SortOrder).ToList();
+        var existing = record.Items.OrderBy(item => item.SortOrder).ToList();
         for (var index = 0; index < input.Count; index++)
         {
-            var item = index < existing.Count ? existing[index] : new MeetingRecordItem { MeetingRecordId = record.Id, Kind = kind };
+            var item = index < existing.Count ? existing[index] : new MeetingRecordItem { MeetingRecordId = record.Id };
             if (index >= existing.Count) record.Items.Add(item);
             item.SortOrder = index;
             item.Content = input[index].Content;
@@ -285,8 +272,7 @@ public sealed class MeetingRecordService(AppDbContext db)
                 record.ProjectId,
                 record.MeetingDate,
                 participantCount = input.Participants.Count,
-                requirementCount = input.Requirements.Count,
-                workFocusCount = input.WorkFocuses.Count
+                itemCount = input.Items.Count
             })
         });
 
@@ -309,14 +295,12 @@ public sealed class MeetingRecordService(AppDbContext db)
 
     private static NormalizedMeetingRecordItem[] NormalizeItems(
         IReadOnlyList<MeetingRecordItemRequest> items,
-        string key,
-        string label,
         Dictionary<string, string[]> errors) =>
         items.Select((item, index) => new NormalizedMeetingRecordItem(
-            NormalizeRequired(item?.Content, 4000, $"第 {index + 1} 条{label}", errors, $"{key}[{index}].content"),
-            NormalizeOptional(item?.Status, 100, $"第 {index + 1} 条{label}状态", errors, $"{key}[{index}].status"),
+            NormalizeRequired(item?.Content, 4000, $"第 {index + 1} 条会议事项", errors, $"items[{index}].content"),
+            NormalizeOptional(item?.Status, 100, $"第 {index + 1} 条会议事项状态", errors, $"items[{index}].status"),
             item?.DueDate,
-            NormalizeOptional(item?.Owner, 100, $"第 {index + 1} 条{label}负责人", errors, $"{key}[{index}].owner")))
+            NormalizeOptional(item?.Owner, 100, $"第 {index + 1} 条会议事项负责人", errors, $"items[{index}].owner")))
             .ToArray();
 
     private static string NormalizeRequired(string? value, int maxLength, string label, Dictionary<string, string[]> errors, string key)
@@ -349,8 +333,7 @@ public sealed record MeetingRecordListRow(
     DateOnly MeetingDate,
     string Location,
     int ParticipantCount,
-    int RequirementCount,
-    int WorkFocusCount,
+    int ItemCount,
     string? FirstItemContent,
     Guid CreatedById,
     string CreatedByDisplayName,
@@ -369,8 +352,7 @@ public sealed record MeetingRecordDetail(
     DateOnly MeetingDate,
     string Location,
     IReadOnlyList<MeetingParticipantRow> Participants,
-    IReadOnlyList<MeetingRecordItemRow> Requirements,
-    IReadOnlyList<MeetingRecordItemRow> WorkFocuses,
+    IReadOnlyList<MeetingRecordItemRow> Items,
     Guid CreatedById,
     string CreatedByDisplayName,
     Guid LastEditedById,
@@ -387,8 +369,7 @@ internal sealed record NormalizedMeetingRecordInput(
     DateOnly MeetingDate,
     string Location,
     IReadOnlyList<NormalizedMeetingParticipant> Participants,
-    IReadOnlyList<NormalizedMeetingRecordItem> Requirements,
-    IReadOnlyList<NormalizedMeetingRecordItem> WorkFocuses);
+    IReadOnlyList<NormalizedMeetingRecordItem> Items);
 
 internal sealed record NormalizedMeetingParticipant(string Name, string? Organization, string? Title, string? Phone);
 internal sealed record NormalizedMeetingRecordItem(string Content, string? Status, DateOnly? DueDate, string? Owner);

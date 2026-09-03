@@ -16,7 +16,7 @@ const props = defineProps<{
 }>()
 const visible = defineModel<boolean>({ required: true })
 const emit = defineEmits<{ save: [payload: MeetingRecordPayload]; reload: [] }>()
-const form = reactive({ projectId: '', meetingDate: '', location: '', participants: [] as ParticipantDraft[], requirements: [] as ItemDraft[], workFocuses: [] as ItemDraft[] })
+const form = reactive({ projectId: '', meetingDate: '', location: '', participants: [] as ParticipantDraft[], items: [] as ItemDraft[] })
 const title = computed(() => props.record ? `编辑 ${props.record.meetingDate} 会议记录` : '新建会议记录')
 const availableProjects = computed(() => props.projects.filter(project => project.isActive || project.id === props.record?.projectId))
 
@@ -31,8 +31,7 @@ function reset() {
     meetingDate: record?.meetingDate ?? '',
     location: record?.location ?? '',
     participants: record?.participants.map(value => ({ clientKey: key(), name: value.name, organization: value.organization ?? '', title: value.title ?? '', phone: value.phone ?? '' })) ?? [participant()],
-    requirements: record?.requirements.map(value => ({ clientKey: key(), content: value.content, status: value.status ?? '', dueDate: value.dueDate ?? '', owner: value.owner ?? '' })) ?? [item()],
-    workFocuses: record?.workFocuses.map(value => ({ clientKey: key(), content: value.content, status: value.status ?? '', dueDate: value.dueDate ?? '', owner: value.owner ?? '' })) ?? [],
+    items: record?.items.map(value => ({ clientKey: key(), content: value.content, status: value.status ?? '', dueDate: value.dueDate ?? '', owner: value.owner ?? '' })) ?? [item()],
   })
 }
 
@@ -51,8 +50,8 @@ function submit() {
     ElMessage.warning('请至少填写一位参会人员，且姓名不能为空。')
     return
   }
-  if (form.requirements.length + form.workFocuses.length === 0 || [...form.requirements, ...form.workFocuses].some(value => !value.content.trim())) {
-    ElMessage.warning('请至少填写一条需求内容或工作重点，且内容不能为空。')
+  if (form.items.length === 0 || form.items.some(value => !value.content.trim())) {
+    ElMessage.warning('请至少填写一条会议事项，且需求内容不能为空。')
     return
   }
   const cleanItems = (values: ItemDraft[]) => values.map(value => ({ content: value.content.trim(), status: value.status.trim() || undefined, dueDate: value.dueDate || undefined, owner: value.owner.trim() || undefined }))
@@ -61,8 +60,7 @@ function submit() {
     meetingDate: form.meetingDate,
     location: form.location.trim(),
     participants: form.participants.map(value => ({ name: value.name.trim(), organization: value.organization.trim() || undefined, title: value.title.trim() || undefined, phone: value.phone.trim() || undefined })),
-    requirements: cleanItems(form.requirements),
-    workFocuses: cleanItems(form.workFocuses),
+    items: cleanItems(form.items),
   })
 }
 
@@ -96,17 +94,17 @@ watch(() => props.loading, (loading, previous) => { if (previous && !loading && 
           </div>
         </section>
 
-        <section v-for="group in [{ key: 'requirements' as const, title: '需求内容' }, { key: 'workFocuses' as const, title: '工作重点' }]" :key="group.key" class="editor-section">
-          <div class="editor-section__head"><div><h3>{{ group.title }}</h3><span>{{ form[group.key].length }} 条</span></div><el-button :icon="Plus" @click="form[group.key].push(item())">添加{{ group.title }}</el-button></div>
-          <div class="editor-grid editor-grid--items editor-grid--header"><span>内容</span><span>状态</span><span>完成时间</span><span>负责人</span><span>排序</span></div>
-          <div v-for="(value, index) in form[group.key]" :key="value.clientKey" class="editor-grid editor-grid--items">
-            <el-input v-model="value.content" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" maxlength="4000" placeholder="填写具体内容" />
+        <section class="editor-section">
+          <div class="editor-section__head"><div><h3>会议内容摘要</h3><span>{{ form.items.length }} 条</span></div><el-button :icon="Plus" @click="form.items.push(item())">添加事项</el-button></div>
+          <div class="editor-grid editor-grid--items editor-grid--header"><span>需求内容</span><span>状态</span><span>截止时间</span><span>负责人</span><span>排序</span></div>
+          <div v-for="(value, index) in form.items" :key="value.clientKey" class="editor-grid editor-grid--items">
+            <el-input v-model="value.content" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" maxlength="4000" placeholder="填写事项内容" />
             <el-input v-model="value.status" maxlength="100" placeholder="自由填写" />
             <el-date-picker v-model="value.dueDate" type="date" value-format="YYYY-MM-DD" placeholder="可不填" />
             <el-input v-model="value.owner" maxlength="100" placeholder="负责人" />
-            <div class="row-actions"><el-tooltip content="上移"><el-button text circle :icon="ArrowUp" :disabled="index === 0" @click="move(form[group.key], index, -1)" /></el-tooltip><el-tooltip content="下移"><el-button text circle :icon="ArrowDown" :disabled="index === form[group.key].length - 1" @click="move(form[group.key], index, 1)" /></el-tooltip><el-tooltip content="删除"><el-button text circle type="danger" :icon="Delete" @click="form[group.key].splice(index, 1)" /></el-tooltip></div>
+            <div class="row-actions"><el-tooltip content="上移"><el-button text circle :icon="ArrowUp" :disabled="index === 0" @click="move(form.items, index, -1)" /></el-tooltip><el-tooltip content="下移"><el-button text circle :icon="ArrowDown" :disabled="index === form.items.length - 1" @click="move(form.items, index, 1)" /></el-tooltip><el-tooltip content="删除"><el-button text circle type="danger" :icon="Delete" @click="form.items.splice(index, 1)" /></el-tooltip></div>
           </div>
-          <el-empty v-if="form[group.key].length === 0" :description="`还没有${group.title}`" :image-size="52" />
+          <el-empty v-if="form.items.length === 0" description="还没有会议事项" :image-size="52" />
         </section>
       </el-form>
     </div>
