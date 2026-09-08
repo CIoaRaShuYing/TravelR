@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, View } from '@element-plus/icons-vue'
-import { api, type Attachment, type ClaimDetail, type ClaimVersion, type ClaimVersionSummary } from '../api'
+import { api, type Attachment, type AttachmentPurpose, type ClaimDetail, type ClaimVersion, type ClaimVersionSummary, type ExpenseItem } from '../api'
 import AttachmentPreviewDialog from './AttachmentPreviewDialog.vue'
 
 const props = withDefaults(defineProps<{ modelValue: boolean; claimId?: string | null; includeSupersededVersions?: boolean }>(), {
@@ -29,11 +29,13 @@ const mealStatusLabels: Record<string, string> = {
   Cancelled: '餐补已作废',
 }
 const categoryLabels: Record<string, string> = { DepartureTransport: '去程交通', ReturnTransport: '回程交通', Lodging: '住宿', OfficeSupplies: '办公用品', Meal: '餐费', Other: '其他' }
+const attachmentPurposes: AttachmentPurpose[] = ['Invoice', 'PaymentRecord']
 
 function money(value: number) { return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(value) }
 function dateTime(value?: string | null) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function approvalActorLabel(status: string) { return status === 'Approved' ? '批准人' : status === 'Rejected' ? '驳回人' : '操作人' }
 function previewAttachment(attachment: Attachment) { previewTarget.value = attachment; previewOpen.value = true }
+function attachmentsFor(item: ExpenseItem, purpose: AttachmentPurpose) { return item.attachments.filter(attachment => attachment.purpose === purpose) }
 
 async function initialize() {
   if (!props.claimId) return
@@ -152,8 +154,13 @@ watch(() => props.modelValue, open => { if (open) initialize() })
               <article v-for="item in selectedVersion.expenseItems" :key="item.id">
                 <div class="detail-expense__head"><strong>{{ categoryLabels[item.category] }}</strong><span>{{ money(item.amount ?? 0) }}</span></div>
                 <dl><div><dt>日期</dt><dd>{{ item.expenseDate || '-' }}</dd></div><div><dt>商户</dt><dd>{{ item.merchant || '-' }}</dd></div><div v-if="item.note"><dt>备注</dt><dd>{{ item.note }}</dd></div></dl>
-                <div v-if="item.attachments.length" class="detail-attachments">
-                  <div v-for="attachment in item.attachments" :key="attachment.id" class="detail-attachment-file"><span>{{ attachment.originalFileName }}</span><div><el-tooltip content="在线预览"><el-button text circle :icon="View" aria-label="预览凭证" @click="previewAttachment(attachment)" /></el-tooltip><el-tooltip content="下载凭证"><el-button text circle :icon="Download" aria-label="下载凭证" @click="downloadAttachment(attachment)" /></el-tooltip></div></div>
+                <div v-if="item.attachments.length" class="detail-evidence-groups">
+                  <section v-for="purpose in attachmentPurposes" :key="purpose" v-show="attachmentsFor(item, purpose).length" class="detail-evidence-group">
+                    <div class="detail-evidence-group__label"><span>{{ purpose === 'Invoice' ? '发票' : '支付记录' }}</span><small>{{ attachmentsFor(item, purpose).length }} 份</small></div>
+                    <div class="detail-attachments">
+                      <div v-for="attachment in attachmentsFor(item, purpose)" :key="attachment.id" class="detail-attachment-file"><span>{{ attachment.originalFileName }}</span><div><el-tooltip content="在线预览"><el-button text circle :icon="View" aria-label="预览凭证" @click="previewAttachment(attachment)" /></el-tooltip><el-tooltip content="下载凭证"><el-button text circle :icon="Download" aria-label="下载凭证" @click="downloadAttachment(attachment)" /></el-tooltip></div></div>
+                    </div>
+                  </section>
                 </div>
               </article>
               <el-empty v-if="selectedVersion.expenseItems.length === 0" description="该版本没有费用明细" :image-size="64" />

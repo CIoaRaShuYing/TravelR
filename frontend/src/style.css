@@ -140,8 +140,21 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 .expense-add-row .el-button:hover, .expense-add-row .el-button:focus-visible { color: var(--spruce); border-color: #92afa4; background: #edf4f0; }
 .attachment-form-item { margin-bottom: 0; }
 .attachment-field { width: 100%; }
-.attachment-row { display: flex; align-items: center; gap: 12px; }
-.attachment-hint { color: var(--muted); font-size: 11px; }
+.evidence-upload-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.evidence-upload-zone { min-width: 0; padding: 12px; border: 1px solid #dbe5e1; border-radius: 7px; background: #f8faf9; }
+.evidence-upload-zone--invoice { --evidence-accent: #397c69; --evidence-soft: #edf6f2; --evidence-line: #a9c7bc; }
+.evidence-upload-zone--payment { --evidence-accent: #9a6b1f; --evidence-soft: #fbf5e8; --evidence-line: #d8bd88; }
+.evidence-upload-zone__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.evidence-upload-zone__head > div { display: flex; align-items: baseline; gap: 8px; }
+.evidence-upload-zone__head strong { color: var(--evidence-accent); font-size: 13px; }
+.evidence-upload-zone__head span, .evidence-upload-zone__head small { color: var(--muted); font-size: 11px; }
+.evidence-uploader, .evidence-uploader .el-upload { width: 100%; }
+.evidence-uploader .el-upload-dragger { width: 100%; min-height: 112px; padding: 18px 14px; border-color: var(--evidence-line); border-radius: 6px; background: var(--evidence-soft); }
+.evidence-uploader .el-upload-dragger:hover, .evidence-uploader .el-upload-dragger:focus-within { border-color: var(--evidence-accent); box-shadow: inset 0 0 0 1px var(--evidence-accent); }
+.evidence-drop-content { display: grid; justify-items: center; gap: 5px; color: var(--evidence-accent); }
+.evidence-drop-content .el-icon { font-size: 23px; }
+.evidence-drop-content strong { font-size: 13px; }
+.evidence-drop-content span { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .attachment-list { display: grid; gap: 6px; margin-top: 10px; }
 .attachment-file { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; padding-left: 12px; border: 1px solid #dfe6e2; border-radius: 5px; background: #fff; }
 .attachment-file > span { min-width: 0; overflow: hidden; color: #455a53; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -197,7 +210,12 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 .detail-expense__head span { color: var(--ink); font-weight: 700; }
 .detail-expenses dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 20px; margin: 12px 0 0; }
 .detail-expenses dl > div { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; }
-.detail-attachments { display: grid; gap: 6px; margin-top: 12px; }
+.detail-evidence-groups { display: grid; gap: 12px; margin-top: 12px; }
+.detail-evidence-group { display: grid; gap: 6px; }
+.detail-evidence-group__label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: var(--teal); }
+.detail-evidence-group__label span { font-size: 12px; font-weight: 700; }
+.detail-evidence-group__label small { color: var(--muted); font-size: 10px; }
+.detail-attachments { display: grid; gap: 6px; }
 .detail-attachment-file { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; min-height: 38px; padding-left: 10px; color: var(--teal); border: 1px solid #d5e1dc; border-radius: 5px; background: #f7faf8; }
 .detail-attachment-file > span { min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .detail-attachment-file > div { display: flex; flex: 0 0 auto; }
@@ -223,11 +241,23 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 .work-tabs .el-tabs__content { display: none; }
 .admin-claim-filters { display: grid; grid-template-columns: repeat(2, minmax(170px, 220px)) repeat(2, minmax(150px, 190px)) minmax(260px, 1fr); gap: 10px; align-items: center; margin-bottom: 14px; }
 .admin-claim-filters > .el-select, .admin-claim-filters > .el-date-editor { width: 100%; }
-.claim-summary-band { display: grid; grid-template-columns: minmax(150px, .7fr) minmax(210px, 1fr) minmax(260px, auto); min-height: 78px; margin: 0 0 12px; color: #f4f8f6; border-radius: 6px; background: var(--spruce); }
+.meal-allowance-filters { display: grid; grid-template-columns: minmax(180px, 240px) minmax(180px, 240px) minmax(280px, 1fr); gap: 10px; align-items: center; margin: 20px 0 14px; }
+.meal-allowance-filters > .el-select, .meal-allowance-filters > .el-date-editor { width: 100%; }
+.meal-allowance-summary { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); min-height: 78px; margin-bottom: 12px; color: #f4f8f6; border-radius: 6px; background: var(--spruce); overflow: hidden; }
+.meal-allowance-summary > div { display: grid; align-content: center; gap: 5px; padding: 15px 20px; border-right: 1px solid #355a52; }
+.meal-allowance-summary > div:last-child { border-right: 0; }
+.meal-allowance-summary span { color: #a7bdb6; font-size: 11px; }
+.meal-allowance-summary strong { color: #d7e5e0; font-size: 20px; }
+.meal-allowance-summary__amount { background: #20483f; }
+.meal-allowance-summary__amount strong { color: #f0bd55; }
+.amount-pending { color: #9a6a16; font-size: 12px; }
+.claim-summary-band { display: grid; grid-template-columns: minmax(130px, .65fr) minmax(190px, 1fr) repeat(2, minmax(170px, .9fr)) minmax(250px, auto); min-height: 78px; margin: 0 0 12px; color: #f4f8f6; border-radius: 6px; background: var(--spruce); }
 .claim-summary-band > div { display: grid; align-content: center; gap: 5px; padding: 15px 20px; border-right: 1px solid #355a52; }
 .claim-summary-band > div:last-child { border-right: 0; }
 .claim-summary-band span { color: #a7bdb6; font-size: 11px; }
 .claim-summary-band strong { color: #f0bd55; font-size: 20px; }
+.claim-summary-band .summary-total { background: #20483f; }
+.claim-summary-band .summary-breakdown strong { color: #d7e5e0; font-size: 17px; }
 .claim-summary-band .summary-mode { grid-template-columns: 1fr auto; align-items: center; }
 .summary-mode span { grid-column: 1 / -1; }
 .summary-mode .el-radio-button__inner { color: #c8d8d2; border-color: #56766c; background: #24483f; }
@@ -288,6 +318,11 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
   .itinerary-grid, .expense-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-claim-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-claim-filters > .el-date-editor { grid-column: 1 / -1; }
+  .meal-allowance-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .meal-allowance-filters > .el-date-editor { grid-column: 1 / -1; }
+  .claim-summary-band { grid-template-columns: 1fr 1fr; }
+  .claim-summary-band > div:nth-child(2), .claim-summary-band > div:nth-child(4) { border-right: 0; }
+  .claim-summary-band .summary-mode { grid-column: 1 / -1; border-top: 1px solid #355a52; }
 }
 
 @media (max-width: 680px) {
@@ -327,7 +362,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
   .attachment-preview-stage { min-height: 240px; height: 64dvh; }
   .expense-item { padding: 14px; }
   .section-heading { align-items: flex-end; }
-  .attachment-row { align-items: flex-start; flex-direction: column; }
+  .evidence-upload-grid { grid-template-columns: 1fr; }
   .claim-editor-footer { align-items: stretch; flex-direction: column; }
   .claim-editor-footer > div { display: grid; grid-template-columns: repeat(3, 1fr); }
   .claim-editor-footer .el-button { width: 100%; margin: 0; }
@@ -342,10 +377,12 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
   .meal-ledger__summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-claim-filters { grid-template-columns: 1fr; }
   .admin-claim-filters > .el-date-editor { grid-column: auto; }
-  .claim-summary-band { grid-template-columns: 1fr 1fr; }
+  .meal-allowance-filters { grid-template-columns: 1fr; }
+  .meal-allowance-filters > .el-date-editor { grid-column: auto; }
+  .meal-allowance-summary { grid-template-columns: 1fr; }
+  .meal-allowance-summary > div { border-right: 0; border-bottom: 1px solid #355a52; }
+  .meal-allowance-summary > div:last-child { border-bottom: 0; }
   .claim-summary-band > div { padding: 14px; }
-  .claim-summary-band > div:nth-child(2) { border-right: 0; }
-  .claim-summary-band .summary-mode { grid-column: 1 / -1; border-top: 1px solid #355a52; }
   .mobile-record__actions { flex-wrap: wrap; }
 }
 

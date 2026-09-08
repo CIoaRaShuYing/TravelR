@@ -341,8 +341,9 @@ secured.MapGet("/claims/{claimId:guid}/versions/{versionId:guid}", async (Guid c
     return version is null ? Results.NotFound() : Results.Ok(ToVersionResponse(version));
 });
 
-secured.MapPost("/attachments/staged", async (IFormFile file, AppDbContext db, IPrivateFileStore fileStore, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+secured.MapPost("/attachments/staged", async (IFormFile file, AttachmentPurpose purpose, AppDbContext db, IPrivateFileStore fileStore, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
 {
+    if (!Enum.IsDefined(purpose)) return Results.BadRequest(new { code = "ATTACHMENT_PURPOSE_INVALID", message = "凭证类型必须是发票或支付记录。" });
     var validation = await AttachmentFileValidator.ValidateAsync(file, cancellationToken);
     if (!validation.IsValid) return Results.BadRequest(new { code = "ATTACHMENT_INVALID", message = validation.ErrorMessage });
     var stored = await fileStore.SaveAsync(file, cancellationToken);
@@ -355,12 +356,13 @@ secured.MapPost("/attachments/staged", async (IFormFile file, AppDbContext db, I
             OriginalFileName = Path.GetFileName(file.FileName),
             ContentType = validation.ContentType!,
             Size = stored.Size,
-            Sha256 = stored.Sha256
+            Sha256 = stored.Sha256,
+            Purpose = purpose
         };
         db.AttachmentAssets.Add(asset);
         await AuditAsync(db, asset.OwnerId, "AttachmentStaged", "AttachmentAsset", asset.Id.ToString(), context.TraceIdentifier);
         await db.SaveChangesAsync(cancellationToken);
-        return Results.Created($"/api/attachments/{asset.Id}/download", new { asset.Id, asset.OriginalFileName, asset.ContentType, asset.Size, asset.ScanStatus, asset.BindingStatus });
+        return Results.Created($"/api/attachments/{asset.Id}/download", new { asset.Id, asset.OriginalFileName, asset.ContentType, asset.Size, asset.Purpose, asset.ScanStatus, asset.BindingStatus });
     }
     catch
     {
@@ -875,9 +877,11 @@ admin.MapGet("/claims", async (Guid? projectId, Guid? applicantId, ClaimStatus? 
     if (createdFrom.HasValue) query = query.Where(x => x.CreatedAt >= createdFrom.Value);
     if (createdTo.HasValue) query = query.Where(x => x.CreatedAt < createdTo.Value.AddDays(1));
     var total = await query.CountAsync();
-    var totalAmount = await query.SumAsync(x => (decimal?)x.CurrentVersion!.TotalAmount) ?? 0m;
+    var reimbursementAmount = await query.SumAsync(x => (decimal?)x.CurrentVersion!.TotalAmount) ?? 0m;
+    var mealAllowanceAmount = await query.SumAsync(x => x.CurrentVersion!.MealAllowance!.TotalAmount) ?? 0m;
+    var totalAmount = reimbursementAmount + mealAllowanceAmount;
     var items = await ProjectClaimList(query.OrderByDescending(x => x.UpdatedAt)).Skip((paging.Page - 1) * paging.PageSize).Take(paging.PageSize).ToListAsync();
-    return Results.Ok(new { items, page = paging.Page, pageSize = paging.PageSize, total, summary = new { claimCount = total, totalAmount } });
+    return Results.Ok(new { items, page = paging.Page, pageSize = paging.PageSize, total, summary = new { claimCount = total, totalAmount, reimbursementAmount, mealAllowanceAmount } });
 });
 
 admin.MapGet("/claims/group-summary", async (string groupBy, Guid? projectId, Guid? applicantId, ClaimStatus? status, PayoutStatus? payoutStatus, string? workQueue, DateTimeOffset? createdFrom, DateTimeOffset? createdTo, AppDbContext db) =>
@@ -900,14 +904,78 @@ admin.MapGet("/claims/group-summary", async (string groupBy, Guid? projectId, Gu
     if (string.Equals(groupBy, "applicant", StringComparison.OrdinalIgnoreCase))
     {
         var groups = await query.GroupBy(x => new { x.ApplicantId, x.Applicant.DisplayName })
-            .Select(g => new { key = g.Key.ApplicantId, label = g.Key.DisplayName, claimCount = g.Count(), totalAmount = g.Sum(x => x.CurrentVersion!.TotalAmount) })
+            .Select(g => new
+            {
+                key = g.Key.ApplicantId,
+                label = g.Key.DisplayName,
+                claimCount = g.Count(),
+                reimbursementAmount = g.Sum(x => x.CurrentVersion!.TotalAmount),
+                mealAllowanceAmount = g.Sum(x => x.CurrentVersion!.MealAllowance!.TotalAmount ?? 0m)
+            })
             .OrderBy(x => x.label).ToListAsync();
-        return Results.Ok(groups);
+        return Results.Ok(groups.Select(x => new { x.key, x.label, x.claimCount, totalAmount = x.reimbursementAmount + x.mealAllowanceAmount }));
     }
     var projectGroups = await query.GroupBy(x => new { x.CurrentVersion!.ProjectId, x.CurrentVersion.Project.Name })
-        .Select(g => new { key = g.Key.ProjectId, label = g.Key.Name, claimCount = g.Count(), totalAmount = g.Sum(x => x.CurrentVersion!.TotalAmount) })
+        .Select(g => new
+        {
+            key = g.Key.ProjectId,
+            label = g.Key.Name,
+            claimCount = g.Count(),
+            reimbursementAmount = g.Sum(x => x.CurrentVersion!.TotalAmount),
+            mealAllowanceAmount = g.Sum(x => x.CurrentVersion!.MealAllowance!.TotalAmount ?? 0m)
+        })
         .OrderBy(x => x.label).ToListAsync();
-    return Results.Ok(projectGroups);
+    return Results.Ok(projectGroups.Select(x => new { x.key, x.label, x.claimCount, totalAmount = x.reimbursementAmount + x.mealAllowanceAmount }));
+});
+
+admin.MapGet("/meal-allowances", async (Guid? projectId, Guid? applicantId, DateOnly? tripFrom, DateOnly? tripTo, int? page, int? pageSize, AppDbContext db) =>
+{
+    if (tripFrom.HasValue && tripTo.HasValue && tripFrom.Value > tripTo.Value)
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["tripDates"] = ["行程开始日期不能晚于结束日期。"] });
+
+    var paging = NormalizePaging(page, pageSize);
+    var query = MealAllowanceLedgerQuery.Apply(
+        db.ReimbursementClaims.AsNoTracking(),
+        projectId,
+        applicantId,
+        tripFrom,
+        tripTo);
+    var total = await query.CountAsync();
+    var determinedAmount = await query.SumAsync(x => x.CurrentVersion!.MealAllowance!.TotalAmount) ?? 0m;
+    var pendingAmountCount = await query.CountAsync(x => x.CurrentVersion!.MealAllowance!.TotalAmount == null);
+    var items = await query
+        .OrderByDescending(x => x.CurrentVersion!.MealAllowance!.DepartureDate)
+        .ThenByDescending(x => x.CurrentVersion!.MealAllowance!.UpdatedAt)
+        .Select(x => new MealAllowanceListRow(
+            x.CurrentVersion!.MealAllowance!.Id,
+            x.Id,
+            x.ClaimNumber,
+            x.CurrentVersionId!.Value,
+            x.CurrentVersion.VersionNumber,
+            x.CurrentVersion.ProjectId,
+            x.CurrentVersion.ProjectCodeSnapshot,
+            x.CurrentVersion.ProjectNameSnapshot,
+            x.ApplicantId,
+            x.Applicant.DisplayName,
+            x.CurrentVersion.MealAllowance.DepartureDate,
+            x.CurrentVersion.MealAllowance.ReturnDate,
+            x.CurrentVersion.MealAllowance.Days,
+            x.CurrentVersion.MealAllowance.DailyAmount,
+            x.CurrentVersion.MealAllowance.TotalAmount,
+            x.CurrentVersion.MealAllowance.Status,
+            x.CurrentVersion.MealAllowance.PayoutStatus,
+            x.CurrentVersion.MealAllowance.UpdatedAt))
+        .Skip((paging.Page - 1) * paging.PageSize)
+        .Take(paging.PageSize)
+        .ToListAsync();
+    return Results.Ok(new
+    {
+        items,
+        page = paging.Page,
+        pageSize = paging.PageSize,
+        total,
+        summary = new { mealAllowanceCount = total, determinedAmount, pendingAmountCount }
+    });
 });
 
 admin.MapPost("/claims/{id:guid}/versions/{versionId:guid}/approve", async (Guid id, Guid versionId, ReviewClaimRequest request, ClaimWorkflowService workflow, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
@@ -1080,7 +1148,7 @@ static object ToVersionResponse(ClaimVersion version) => new
         item.ExpenseDate,
         item.Merchant,
         item.Note,
-        attachments = item.AttachmentLinks.Select(link => new { link.AttachmentAsset.Id, link.AttachmentAsset.OriginalFileName, link.AttachmentAsset.ContentType, link.AttachmentAsset.Size, link.AttachmentAsset.ScanStatus })
+        attachments = item.AttachmentLinks.Select(link => new { link.AttachmentAsset.Id, link.AttachmentAsset.OriginalFileName, link.AttachmentAsset.ContentType, link.AttachmentAsset.Size, link.AttachmentAsset.Purpose, link.AttachmentAsset.ScanStatus })
     })
 };
 
@@ -1159,6 +1227,26 @@ public sealed record ClaimListRow(
     Guid? MealAllowanceConcurrencyToken,
     Guid ConcurrencyToken,
     DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record MealAllowanceListRow(
+    Guid Id,
+    Guid ClaimId,
+    string ClaimNumber,
+    Guid CurrentVersionId,
+    int VersionNumber,
+    Guid ProjectId,
+    string ProjectCode,
+    string ProjectName,
+    Guid ApplicantId,
+    string ApplicantName,
+    DateOnly? DepartureDate,
+    DateOnly? ReturnDate,
+    int Days,
+    decimal? DailyAmount,
+    decimal? TotalAmount,
+    MealAllowanceStatus Status,
+    PayoutStatus PayoutStatus,
     DateTimeOffset UpdatedAt);
 
 public sealed record WeeklyReportRow(

@@ -6,6 +6,7 @@ import AdminUsersView from './views/AdminUsersView.vue'
 import AdminProjectsView from './views/AdminProjectsView.vue'
 import AdminSettingsView from './views/AdminSettingsView.vue'
 import AdminClaimsView from './views/AdminClaimsView.vue'
+import AdminMealAllowancesView from './views/AdminMealAllowancesView.vue'
 import ProfileView from './views/ProfileView.vue'
 import WeeklyReportsView from './views/WeeklyReportsView.vue'
 import MeetingRecordsView from './views/MeetingRecordsView.vue'
@@ -24,6 +25,7 @@ export const router = createRouter({
     { path: '/admin/registrations', component: AdminRegistrationsView, meta: { title: '注册审批', administrator: true } },
     { path: '/admin/projects', component: AdminProjectsView, meta: { title: '项目管理', administrator: true } },
     { path: '/admin/claims', component: AdminClaimsView, meta: { title: '报销管理', administrator: true } },
+    { path: '/admin/meal-allowances', component: AdminMealAllowancesView, meta: { title: '餐补详情', administrator: true } },
     { path: '/admin/settings', component: AdminSettingsView, meta: { title: '注册策略', administrator: true } },
     { path: '/:pathMatch(.*)*', redirect: '/claims' },
   ],

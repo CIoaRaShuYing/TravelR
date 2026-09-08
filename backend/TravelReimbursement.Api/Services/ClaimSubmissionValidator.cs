@@ -14,7 +14,7 @@ public static class ClaimSubmissionValidator
         if (version.ExpenseItems.Any(x => x.ExpenseDate is null)) errors["expenseDate"] = ["每项费用均需填写费用日期。"];
         if (version.ExpenseItems.Any(x => string.IsNullOrWhiteSpace(x.Merchant))) errors["merchant"] = ["每项费用均需填写商户或承运方。"];
         if (version.ExpenseItems.Any(x => x.AttachmentLinks.All(link => link.AttachmentAsset.ScanStatus != AttachmentScanStatus.Accepted)))
-            errors["attachments"] = ["每项费用均需上传有效凭证。"];
+            errors["attachments"] = ["每项费用均需上传发票或支付记录。"];
 
         if (type == ClaimType.Travel)
         {

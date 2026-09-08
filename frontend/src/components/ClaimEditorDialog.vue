@@ -5,6 +5,7 @@ import { Delete, Download, Plus, Upload, View } from '@element-plus/icons-vue'
 import {
   api,
   type Attachment,
+  type AttachmentPurpose,
   type ClaimDetail,
   type ClaimDraftPayload,
   type ClaimType,
@@ -21,7 +22,7 @@ type EditorExpenseItem = {
   merchant: string
   note: string
   attachments: Attachment[]
-  uploading: boolean
+  uploading: Record<AttachmentPurpose, number>
 }
 
 const props = defineProps<{ modelValue: boolean; claimId?: string | null }>()
@@ -55,6 +56,10 @@ const categoryLabels: Record<ExpenseCategory, string> = {
   Unspecified: '未选择',
 }
 const categoryOptions: ExpenseCategory[] = ['DepartureTransport', 'ReturnTransport', 'Lodging', 'OfficeSupplies', 'Meal', 'Other']
+const attachmentPurposeOptions: Array<{ value: AttachmentPurpose; label: string; action: string }> = [
+  { value: 'Invoice', label: '发票', action: '发票上传' },
+  { value: 'PaymentRecord', label: '支付记录', action: '支付记录上传' },
+]
 const totalAmount = computed(() => form.expenseItems.reduce((sum, item) => sum + Number(item.amount ?? 0), 0))
 const title = computed(() => currentClaim.value ? `编辑报销 · ${currentClaim.value.claimNumber}` : '新增报销')
 const mealAllowanceDays = computed(() => {
@@ -79,7 +84,7 @@ function newClientKey() {
 }
 
 function newExpenseItem(category: '' | ExpenseCategory = ''): EditorExpenseItem {
-  return { clientKey: newClientKey(), category, amount: undefined, expenseDate: '', merchant: '', note: '', attachments: [], uploading: false }
+  return { clientKey: newClientKey(), category, amount: undefined, expenseDate: '', merchant: '', note: '', attachments: [], uploading: { Invoice: 0, PaymentRecord: 0 } }
 }
 
 function defaultExpenseItems(type: ClaimType) {
@@ -123,7 +128,7 @@ async function initialize() {
       merchant: item.merchant ?? '',
       note: item.note ?? '',
       attachments: [...item.attachments],
-      uploading: false,
+      uploading: { Invoice: 0, PaymentRecord: 0 },
     }))
     if (!projects.value.some(project => project.id === claim.currentVersion.projectId)) {
       projects.value.push({
@@ -151,28 +156,33 @@ function removeAttachment(item: EditorExpenseItem, attachmentId: string) {
   item.attachments = item.attachments.filter(attachment => attachment.id !== attachmentId)
 }
 
+function attachmentsFor(item: EditorExpenseItem, purpose: AttachmentPurpose) {
+  return item.attachments.filter(attachment => attachment.purpose === purpose)
+}
+
 function previewAttachment(attachment: Attachment) {
   previewTarget.value = attachment
   previewOpen.value = true
 }
 
-async function uploadAttachment(item: EditorExpenseItem, uploadFile: UploadFile) {
+async function uploadAttachment(item: EditorExpenseItem, purpose: AttachmentPurpose, uploadFile: UploadFile) {
   const file = uploadFile.raw
   if (!file) return
   if (file.size > 10 * 1024 * 1024) { ElMessage.error('单个凭证不能超过 10MB。'); return }
-  item.uploading = true
+  item.uploading[purpose] += 1
   try {
-    item.attachments.push(await api.uploadStagedAttachment(file))
-    ElMessage.success('凭证已上传。')
+    item.attachments.push(await api.uploadStagedAttachment(file, purpose))
+    const label = purpose === 'Invoice' ? '发票' : '支付记录'
+    ElMessage.success(`${label}已上传。`)
   } catch (error) {
     ElMessage.error(api.message(error, '凭证上传失败。'))
   } finally {
-    item.uploading = false
+    item.uploading[purpose] -= 1
   }
 }
 
-function uploadHandler(item: EditorExpenseItem) {
-  return (file: UploadFile) => uploadAttachment(item, file)
+function uploadHandler(item: EditorExpenseItem, purpose: AttachmentPurpose) {
+  return (file: UploadFile) => uploadAttachment(item, purpose, file)
 }
 
 async function downloadAttachment(attachment: Attachment) {
@@ -231,7 +241,7 @@ function validateForSubmit(): string | null {
     if (!item.amount || item.amount <= 0) return `请填写${itemLabel}的金额。`
     if (!item.expenseDate) return `请选择${itemLabel}的费用日期。`
     if (!item.merchant.trim()) return `请填写${itemLabel}的商户或承运方。`
-    if (item.attachments.length === 0) return `请上传${itemLabel}的有效凭证。`
+    if (item.attachments.length === 0) return `请上传${itemLabel}的发票或支付记录。`
   }
 
   if (form.type === 'Travel') {
@@ -338,7 +348,7 @@ function handleDialogOpen() { initialize() }
 
         <section class="editor-section">
           <div class="section-heading">
-            <div><h3>费用明细 <span class="required-mark" aria-hidden="true">*</span></h3><p>至少添加一项；每项提交前都需填写完整并上传有效凭证。</p></div>
+            <div><h3>费用明细 <span class="required-mark" aria-hidden="true">*</span></h3><p>至少添加一项；每项提交前需上传发票或支付记录，凭证是否有效由管理员审核。</p></div>
           </div>
           <div class="expense-list">
             <article v-for="(item, index) in form.expenseItems" :key="item.clientKey" class="expense-item">
@@ -350,19 +360,37 @@ function handleDialogOpen() { initialize() }
                 <el-form-item label="商户 / 承运方" required><el-input v-model="item.merchant" maxlength="200" /></el-form-item>
               </div>
               <el-form-item label="备注"><el-input v-model="item.note" maxlength="500" placeholder="可选" /></el-form-item>
-              <el-form-item label="凭证" required class="attachment-form-item">
+              <el-form-item label="凭证（发票或支付记录至少一项）" required class="attachment-form-item">
                 <div class="attachment-field">
-                  <div class="attachment-row">
-                    <el-upload accept=".jpg,.jpeg,.png,.pdf" :auto-upload="false" :show-file-list="false" :on-change="uploadHandler(item)">
-                      <el-button :icon="Upload" :loading="item.uploading">上传凭证</el-button>
-                    </el-upload>
-                    <span class="attachment-hint">JPG、PNG 或 PDF，单个不超过 10MB</span>
-                  </div>
-                  <div v-if="item.attachments.length" class="attachment-list">
-                    <div v-for="attachment in item.attachments" :key="attachment.id" class="attachment-file">
-                      <span>{{ attachment.originalFileName }}</span>
-                      <div><el-tooltip content="在线预览"><el-button text circle :icon="View" aria-label="预览凭证" @click="previewAttachment(attachment)" /></el-tooltip><el-tooltip content="下载凭证"><el-button text circle :icon="Download" aria-label="下载凭证" @click="downloadAttachment(attachment)" /></el-tooltip><el-tooltip content="从本版本移除"><el-button text circle type="danger" :icon="Delete" aria-label="移除凭证" @click="removeAttachment(item, attachment.id)" /></el-tooltip></div>
-                    </div>
+                  <div class="evidence-upload-grid">
+                    <section v-for="purpose in attachmentPurposeOptions" :key="purpose.value" class="evidence-upload-zone" :class="`evidence-upload-zone--${purpose.value === 'Invoice' ? 'invoice' : 'payment'}`">
+                      <div class="evidence-upload-zone__head">
+                        <div><strong>{{ purpose.label }}</strong><span>{{ attachmentsFor(item, purpose.value).length }} 份</span></div>
+                        <small>可选其一</small>
+                      </div>
+                      <el-upload
+                        class="evidence-uploader"
+                        drag
+                        multiple
+                        accept=".jpg,.jpeg,.png,.pdf"
+                        :auto-upload="false"
+                        :show-file-list="false"
+                        :disabled="item.uploading[purpose.value] > 0"
+                        :on-change="uploadHandler(item, purpose.value)"
+                      >
+                        <div class="evidence-drop-content">
+                          <el-icon><Upload /></el-icon>
+                          <strong>{{ item.uploading[purpose.value] > 0 ? '正在上传…' : `拖拽${purpose.label}到这里` }}</strong>
+                          <span>或点击{{ purpose.action }} · JPG、PNG、PDF · 单个不超过 10MB</span>
+                        </div>
+                      </el-upload>
+                      <div v-if="attachmentsFor(item, purpose.value).length" class="attachment-list">
+                        <div v-for="attachment in attachmentsFor(item, purpose.value)" :key="attachment.id" class="attachment-file">
+                          <span>{{ attachment.originalFileName }}</span>
+                          <div><el-tooltip content="在线预览"><el-button text circle :icon="View" :aria-label="`预览${purpose.label}`" @click="previewAttachment(attachment)" /></el-tooltip><el-tooltip content="下载凭证"><el-button text circle :icon="Download" :aria-label="`下载${purpose.label}`" @click="downloadAttachment(attachment)" /></el-tooltip><el-tooltip content="从本版本移除"><el-button text circle type="danger" :icon="Delete" :aria-label="`移除${purpose.label}`" @click="removeAttachment(item, attachment.id)" /></el-tooltip></div>
+                        </div>
+                      </div>
+                    </section>
                   </div>
                 </div>
               </el-form-item>

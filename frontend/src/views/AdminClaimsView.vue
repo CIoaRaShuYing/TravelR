@@ -18,7 +18,7 @@ const applicants = ref<ApplicantOption[]>([])
 const groups = ref<GroupRow[]>([])
 const groupBy = ref<GroupBy>('project')
 const total = ref(0)
-const summary = reactive({ claimCount: 0, totalAmount: 0 })
+const summary = reactive({ claimCount: 0, totalAmount: 0, reimbursementAmount: 0, mealAllowanceAmount: 0 })
 const filters = reactive<{ projectId: string; applicantId: string; status: '' | ClaimStatus; payoutStatus: '' | PayoutStatus; dates: string[]; page: number; pageSize: number }>({
   projectId: '', applicantId: '', status: '', payoutStatus: '', dates: [], page: 1, pageSize: 20,
 })
@@ -56,6 +56,7 @@ const mealStatusLabels: Record<string, string> = { Draft: '草稿', PendingTrave
 const mealTotalAmount = computed(() => Number(mealDailyAmount.value ?? 0) * Number(mealReviewTarget.value?.mealAllowanceDays ?? 0))
 
 function money(value: number) { return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(value) }
+function currentVersionTotalAmount(row: ClaimListRow) { return row.totalAmount + (row.mealAllowanceTotalAmount ?? 0) }
 function dateTime(value: string) { return new Date(value).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
 function statusType(status: ClaimStatus) { return status === 'Approved' ? 'success' : status === 'Rejected' ? 'danger' : status === 'Submitted' ? 'warning' : 'info' }
 function claimStatusLabel(status: string) { return statusLabels[status as ClaimStatus] }
@@ -111,6 +112,8 @@ async function load() {
     total.value = result.total
     summary.claimCount = result.summary.claimCount
     summary.totalAmount = result.summary.totalAmount
+    summary.reimbursementAmount = result.summary.reimbursementAmount
+    summary.mealAllowanceAmount = result.summary.mealAllowanceAmount
     groups.value = groupResult
   } catch (error) {
     ElMessage.error(api.message(error, '加载报销管理列表失败。'))
@@ -276,13 +279,15 @@ onMounted(async () => { await loadOptions(); await load() })
 
     <div class="claim-summary-band">
       <div><span>{{ workViewLabels[activeView] }}笔数</span><strong>{{ summary.claimCount }}</strong></div>
-      <div><span>当前版本金额</span><strong>{{ money(summary.totalAmount) }}</strong></div>
+      <div class="summary-total"><span>当前版本总金额</span><strong>{{ money(summary.totalAmount) }}</strong></div>
+      <div class="summary-breakdown"><span>当前版本报销金额</span><strong>{{ money(summary.reimbursementAmount) }}</strong></div>
+      <div class="summary-breakdown"><span>当前版本餐补金额</span><strong>{{ money(summary.mealAllowanceAmount) }}</strong></div>
       <div class="summary-mode"><span>划分方式</span><el-radio-group v-model="groupBy" size="small"><el-radio-button value="project">按项目</el-radio-button><el-radio-button value="applicant">按人员</el-radio-button></el-radio-group></div>
     </div>
 
     <div class="group-ledger" aria-label="报销分组汇总">
       <button v-for="group in groups" :key="group.key" type="button" :class="{ active: groupBy === 'project' ? filters.projectId === group.key : filters.applicantId === group.key }" @click="selectGroup(group)">
-        <span>{{ group.label }}</span><strong>{{ group.claimCount }} 笔</strong><em>{{ money(group.totalAmount) }}</em>
+        <span>{{ group.label }}</span><strong>{{ group.claimCount }} 笔</strong><em>总金额 {{ money(group.totalAmount) }}</em>
       </button>
       <p v-if="!loading && groups.length === 0">当前条件下没有可汇总的报销。</p>
     </div>
@@ -293,10 +298,11 @@ onMounted(async () => { await loadOptions(); await load() })
         <el-table-column label="项目" min-width="180"><template #default="scope"><div class="primary-cell"><strong>{{ scope.row.projectName }}</strong><span>{{ scope.row.projectCode }}</span></div></template></el-table-column>
         <el-table-column label="报销" min-width="205"><template #default="scope"><div class="primary-cell"><strong>{{ scope.row.claimNumber }}</strong><span>v{{ scope.row.versionNumber }} · {{ scope.row.type === 'Travel' ? '差旅' : '单据' }}</span></div></template></el-table-column>
         <el-table-column prop="description" label="说明" min-width="180" show-overflow-tooltip />
-        <el-table-column label="金额" width="125" align="right"><template #default="scope">{{ money(scope.row.totalAmount) }}</template></el-table-column>
+        <el-table-column label="当前版本总金额" width="145" align="right"><template #default="scope">{{ money(currentVersionTotalAmount(scope.row)) }}</template></el-table-column>
+        <el-table-column label="报销金额" width="125" align="right"><template #default="scope">{{ money(scope.row.totalAmount) }}</template></el-table-column>
         <el-table-column label="报销状态" width="105"><template #default="scope"><el-tag :type="statusType(scope.row.status)" effect="plain">{{ claimStatusLabel(scope.row.status) }}</el-tag></template></el-table-column>
         <el-table-column label="报销发放" width="105"><template #default="scope"><el-tag :type="scope.row.payoutStatus === 'Paid' ? 'success' : scope.row.payoutStatus === 'Pending' ? 'warning' : 'info'" effect="plain">{{ payoutStatusLabel(scope.row.payoutStatus) }}</el-tag></template></el-table-column>
-        <el-table-column label="餐补" min-width="185"><template #default="scope"><div v-if="scope.row.mealAllowanceStatus" class="primary-cell"><strong>{{ mealStatusLabels[scope.row.mealAllowanceStatus] }}</strong><span>{{ scope.row.mealAllowanceDays }} 天 · {{ scope.row.mealAllowanceTotalAmount == null ? '金额待核定' : money(scope.row.mealAllowanceTotalAmount) }} · {{ payoutStatusLabel(scope.row.mealAllowancePayoutStatus ?? 'NotApplicable') }}</span></div><span v-else>-</span></template></el-table-column>
+        <el-table-column label="餐补金额 / 状态" min-width="205"><template #default="scope"><div v-if="scope.row.mealAllowanceStatus" class="primary-cell"><strong>{{ money(scope.row.mealAllowanceTotalAmount ?? 0) }}</strong><span>{{ scope.row.mealAllowanceDays }} 天 · {{ mealStatusLabels[scope.row.mealAllowanceStatus] }} · {{ scope.row.mealAllowanceTotalAmount == null ? '金额待核定' : '金额已核定' }} · {{ payoutStatusLabel(scope.row.mealAllowancePayoutStatus ?? 'NotApplicable') }}</span></div><span v-else>{{ money(0) }}</span></template></el-table-column>
         <el-table-column label="更新" width="120"><template #default="scope">{{ dateTime(scope.row.updatedAt) }}</template></el-table-column>
         <el-table-column label="操作" width="220" fixed="right"><template #default="scope"><el-tooltip content="查看详情"><el-button text circle :icon="View" aria-label="查看详情" @click="openDetail(scope.row)" /></el-tooltip><template v-if="scope.row.status === 'Submitted'"><el-tooltip content="批准报销"><el-button text circle type="success" :icon="Check" aria-label="批准报销" @click="openReview(scope.row, 'approve')" /></el-tooltip><el-tooltip content="驳回报销"><el-button text circle type="danger" :icon="Close" aria-label="驳回报销" @click="openReview(scope.row, 'reject')" /></el-tooltip></template><template v-if="scope.row.mealAllowanceStatus === 'PendingReview'"><el-tooltip content="批准餐补"><el-button text circle type="success" :icon="Check" aria-label="批准餐补" @click="openMealReview(scope.row, 'approve')" /></el-tooltip><el-tooltip content="驳回餐补"><el-button text circle type="danger" :icon="Close" aria-label="驳回餐补" @click="openMealReview(scope.row, 'reject')" /></el-tooltip></template><el-tooltip v-if="scope.row.status === 'Approved' && scope.row.payoutStatus === 'Pending'" content="确认报销发放"><el-button text circle type="warning" :icon="Coin" aria-label="确认报销发放" @click="openPayout(scope.row)" /></el-tooltip><el-tooltip v-if="scope.row.mealAllowanceStatus === 'Approved' && scope.row.mealAllowancePayoutStatus === 'Pending'" content="确认餐补发放"><el-button text circle type="primary" :icon="Coin" aria-label="确认餐补发放" @click="openMealPayout(scope.row)" /></el-tooltip></template></el-table-column>
       </el-table>
@@ -304,10 +310,11 @@ onMounted(async () => { await loadOptions(); await load() })
 
     <div class="mobile-list" v-loading="loading">
       <article v-for="item in rows" :key="item.id" class="mobile-record admin-claim-mobile">
-        <div class="mobile-record__head"><div><strong>{{ item.applicantName }} · {{ item.projectName }}</strong><span>{{ item.projectCode }} · {{ item.claimNumber }} · v{{ item.versionNumber }}</span></div><strong>{{ money(item.totalAmount) }}</strong></div>
+        <div class="mobile-record__head"><div><strong>{{ item.applicantName }} · {{ item.projectName }}</strong><span>{{ item.projectCode }} · {{ item.claimNumber }} · v{{ item.versionNumber }}</span></div><strong>{{ money(currentVersionTotalAmount(item)) }}</strong></div>
         <p>{{ item.description || '暂无报销说明' }}</p>
+        <p class="mobile-record__meta">当前版本：报销 {{ money(item.totalAmount) }} · 餐补 {{ money(item.mealAllowanceTotalAmount ?? 0) }}{{ item.mealAllowanceStatus && item.mealAllowanceTotalAmount == null ? '（待核定）' : '' }}</p>
         <div class="claim-mobile-status"><el-tag :type="statusType(item.status)" effect="plain">{{ statusLabels[item.status] }}</el-tag><el-tag :type="item.payoutStatus === 'Paid' ? 'success' : item.payoutStatus === 'Pending' ? 'warning' : 'info'" effect="plain">报销{{ payoutLabels[item.payoutStatus] }}</el-tag><el-tag v-if="item.mealAllowanceStatus" effect="plain">{{ mealStatusLabels[item.mealAllowanceStatus] }}</el-tag></div>
-        <p v-if="item.mealAllowanceStatus" class="mobile-record__meta">餐补 {{ item.mealAllowanceDays }} 天 · {{ item.mealAllowanceTotalAmount == null ? '金额待核定' : money(item.mealAllowanceTotalAmount) }} · {{ payoutStatusLabel(item.mealAllowancePayoutStatus ?? 'NotApplicable') }}</p>
+        <p v-if="item.mealAllowanceStatus" class="mobile-record__meta">餐补 {{ item.mealAllowanceDays }} 天 · {{ mealStatusLabels[item.mealAllowanceStatus] }} · {{ payoutStatusLabel(item.mealAllowancePayoutStatus ?? 'NotApplicable') }}</p>
         <div class="mobile-record__actions"><el-button :icon="View" @click="openDetail(item)">查看</el-button><template v-if="item.status === 'Submitted'"><el-button type="success" plain :icon="Check" @click="openReview(item, 'approve')">批准报销</el-button><el-button type="danger" plain :icon="Close" @click="openReview(item, 'reject')">驳回报销</el-button></template><template v-if="item.mealAllowanceStatus === 'PendingReview'"><el-button type="success" plain :icon="Check" @click="openMealReview(item, 'approve')">批准餐补</el-button><el-button type="danger" plain :icon="Close" @click="openMealReview(item, 'reject')">驳回餐补</el-button></template><el-button v-if="item.status === 'Approved' && item.payoutStatus === 'Pending'" type="warning" plain :icon="Coin" @click="openPayout(item)">报销发放</el-button><el-button v-if="item.mealAllowanceStatus === 'Approved' && item.mealAllowancePayoutStatus === 'Pending'" type="primary" plain :icon="Coin" @click="openMealPayout(item)">餐补发放</el-button></div>
       </article>
       <el-empty v-if="!loading && rows.length === 0" description="当前工作视图没有报销" />

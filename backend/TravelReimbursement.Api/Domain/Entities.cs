@@ -13,6 +13,7 @@ public enum MealAllowanceStatus { Draft, PendingTravelReview, PendingReview, App
 public enum ExpenseCategory { DepartureTransport, ReturnTransport, Lodging, OfficeSupplies, Meal, Other, Unspecified }
 public enum AttachmentScanStatus { Pending, Accepted, Rejected }
 public enum AttachmentBindingStatus { Staged, Bound }
+public enum AttachmentPurpose { Invoice, PaymentRecord }
 
 public sealed class AppUser : IdentityUser<Guid>
 {
@@ -200,6 +201,7 @@ public sealed class AttachmentAsset
     public string ContentType { get; set; } = string.Empty;
     public long Size { get; set; }
     public string Sha256 { get; set; } = string.Empty;
+    public AttachmentPurpose Purpose { get; set; } = AttachmentPurpose.Invoice;
     public AttachmentScanStatus ScanStatus { get; set; } = AttachmentScanStatus.Accepted;
     public AttachmentBindingStatus BindingStatus { get; set; } = AttachmentBindingStatus.Staged;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

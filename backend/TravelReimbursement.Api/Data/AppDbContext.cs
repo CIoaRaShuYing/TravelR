@@ -147,6 +147,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.Property(x => x.OriginalFileName).HasMaxLength(255);
             entity.Property(x => x.ContentType).HasMaxLength(128);
             entity.Property(x => x.Sha256).HasMaxLength(64);
+            entity.Property(x => x.Purpose).HasConversion<string>().HasMaxLength(32);
             entity.Property(x => x.ScanStatus).HasConversion<string>().HasMaxLength(16);
             entity.Property(x => x.BindingStatus).HasConversion<string>().HasMaxLength(16);
             entity.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Restrict);

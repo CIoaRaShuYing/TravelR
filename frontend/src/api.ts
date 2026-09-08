@@ -82,14 +82,38 @@ export type ClaimListRow = {
   updatedAt: string
 }
 
+export type MealAllowanceListRow = {
+  id: string
+  claimId: string
+  claimNumber: string
+  currentVersionId: string
+  versionNumber: number
+  projectId: string
+  projectCode: string
+  projectName: string
+  applicantId: string
+  applicantName: string
+  departureDate?: string | null
+  returnDate?: string | null
+  days: number
+  dailyAmount?: number | null
+  totalAmount?: number | null
+  status: MealAllowanceStatus
+  payoutStatus: PayoutStatus
+  updatedAt: string
+}
+
 export type Attachment = {
   id: string
   originalFileName: string
   contentType: string
   size: number
+  purpose: AttachmentPurpose
   scanStatus: string
   bindingStatus?: string
 }
+
+export type AttachmentPurpose = 'Invoice' | 'PaymentRecord'
 
 export type ExpenseItem = {
   id: string
@@ -366,10 +390,10 @@ export const api = {
   createClaimVersion: (id: string, body: ClaimDraftPayload & { expectedCurrentVersionId: string; concurrencyToken: string }) => request<ClaimDetail>(`/claims/${id}/versions`, { method: 'POST', body: JSON.stringify(body) }),
   submitClaim: (id: string, body: { expectedCurrentVersionId: string; concurrencyToken: string }) => request<ClaimDetail>(`/claims/${id}/submit`, { method: 'POST', body: JSON.stringify(body) }),
   cancelClaim: (id: string, body: { expectedCurrentVersionId: string; concurrencyToken: string }) => request<ClaimDetail>(`/claims/${id}/cancel`, { method: 'POST', body: JSON.stringify(body) }),
-  uploadStagedAttachment: (file: File) => {
+  uploadStagedAttachment: (file: File, purpose: AttachmentPurpose) => {
     const body = new FormData()
     body.append('file', file)
-    return request<Attachment>('/attachments/staged', { method: 'POST', body })
+    return request<Attachment>(`/attachments/staged?purpose=${encodeURIComponent(purpose)}`, { method: 'POST', body })
   },
   attachmentDownloadUrl: (id: string) => `${baseUrl}/attachments/${id}/download`,
   async downloadAttachment(id: string) {
@@ -421,8 +445,9 @@ export const api = {
   createProject: (body: { code: string; name: string; description?: string }) => request<Project>('/admin/projects', { method: 'POST', body: JSON.stringify(body) }),
   updateProject: (id: string, body: { name: string; description?: string; concurrencyToken: string }) => request<Project>(`/admin/projects/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   setProjectActive: (id: string, active: boolean) => request<{ id: string; isActive: boolean; concurrencyToken: string }>(`/admin/projects/${id}/${active ? 'enable' : 'disable'}`, { method: 'POST', body: '{}' }),
-  listAdminClaims: (filters: { projectId?: string; applicantId?: string; status?: ClaimStatus; payoutStatus?: PayoutStatus; workQueue?: 'approval' | 'payout'; createdFrom?: string; createdTo?: string; page?: number; pageSize?: number }) => request<PagedResult<ClaimListRow> & { summary: { claimCount: number; totalAmount: number } }>(`/admin/claims${queryString(filters)}`),
+  listAdminClaims: (filters: { projectId?: string; applicantId?: string; status?: ClaimStatus; payoutStatus?: PayoutStatus; workQueue?: 'approval' | 'payout'; createdFrom?: string; createdTo?: string; page?: number; pageSize?: number }) => request<PagedResult<ClaimListRow> & { summary: { claimCount: number; totalAmount: number; reimbursementAmount: number; mealAllowanceAmount: number } }>(`/admin/claims${queryString(filters)}`),
   getClaimGroupSummary: (filters: { groupBy: 'project' | 'applicant'; projectId?: string; applicantId?: string; status?: ClaimStatus; payoutStatus?: PayoutStatus; workQueue?: 'approval' | 'payout'; createdFrom?: string; createdTo?: string }) => request<Array<{ key: string; label: string; claimCount: number; totalAmount: number }>>(`/admin/claims/group-summary${queryString(filters)}`),
+  listAdminMealAllowances: (filters: { projectId?: string; applicantId?: string; tripFrom?: string; tripTo?: string; page?: number; pageSize?: number }) => request<PagedResult<MealAllowanceListRow> & { summary: { mealAllowanceCount: number; determinedAmount: number; pendingAmountCount: number } }>(`/admin/meal-allowances${queryString(filters)}`),
   reviewClaim: (claimId: string, versionId: string, action: 'approve' | 'reject', body: { expectedCurrentVersionId: string; concurrencyToken: string; comment?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/versions/${versionId}/${action}`, { method: 'POST', body: JSON.stringify(body) }),
   confirmPayout: (claimId: string, body: { expectedCurrentVersionId: string; concurrencyToken: string; note?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/payout/confirm`, { method: 'POST', body: JSON.stringify(body) }),
   reviewMealAllowance: (claimId: string, action: 'approve' | 'reject', body: { expectedCurrentVersionId: string; claimConcurrencyToken: string; mealConcurrencyToken: string; dailyAmount?: number; comment?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/meal-allowance/${action}`, { method: 'POST', body: JSON.stringify(body) }),

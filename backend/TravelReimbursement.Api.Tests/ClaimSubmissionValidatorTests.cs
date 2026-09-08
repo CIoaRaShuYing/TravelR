@@ -85,6 +85,28 @@ public sealed class ClaimSubmissionValidatorTests
         Assert.Contains("attachments", errors.Keys);
     }
 
+    [Theory]
+    [InlineData(AttachmentPurpose.Invoice)]
+    [InlineData(AttachmentPurpose.PaymentRecord)]
+    public void Either_attachment_purpose_satisfies_submission_requirement(AttachmentPurpose purpose)
+    {
+        var item = CreateItem(ExpenseCategory.OfficeSupplies);
+        item.AttachmentLinks[0].AttachmentAsset.Purpose = purpose;
+        var version = CreateVersion(item);
+
+        var errors = ClaimSubmissionValidator.Validate(ClaimType.General, version);
+
+        Assert.DoesNotContain("attachments", errors.Keys);
+    }
+
+    [Fact]
+    public void Historical_attachment_defaults_to_invoice()
+    {
+        var asset = new AttachmentAsset();
+
+        Assert.Equal(AttachmentPurpose.Invoice, asset.Purpose);
+    }
+
     [Fact]
     public void Return_date_cannot_be_before_departure_date()
     {
