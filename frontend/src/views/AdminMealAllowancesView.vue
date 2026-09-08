@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, View } from '@element-plus/icons-vue'
-import { api, type ApplicantOption, type MealAllowanceListRow, type MealAllowanceStatus, type PayoutStatus, type Project } from '../api'
+import { api, type ApplicantOption, type DashboardGroupRow, type MealAllowanceListRow, type MealAllowanceStatus, type PayoutStatus, type Project } from '../api'
 import ClaimDetailDrawer from '../components/ClaimDetailDrawer.vue'
 
 const loading = ref(false)
@@ -10,6 +10,8 @@ const applicantLoading = ref(false)
 const rows = ref<MealAllowanceListRow[]>([])
 const projects = ref<Project[]>([])
 const applicants = ref<ApplicantOption[]>([])
+const groups = ref<DashboardGroupRow[]>([])
+const groupBy = ref<'project' | 'applicant'>('project')
 const total = ref(0)
 const summary = reactive({ mealAllowanceCount: 0, determinedAmount: 0, pendingAmountCount: 0 })
 const filters = reactive<{ projectId: string; applicantId: string; dates: string[]; page: number; pageSize: number }>({
@@ -74,29 +76,40 @@ async function loadApplicants(keyword = '') {
 async function load() {
   loading.value = true
   try {
-    const result = await api.listAdminMealAllowances({ ...appliedFilters(), page: filters.page, pageSize: filters.pageSize })
+    const applied = appliedFilters()
+    const [result, groupResult] = await Promise.all([
+      api.listAdminMealAllowances({ ...applied, page: filters.page, pageSize: filters.pageSize }),
+      api.getMealAllowanceGroupSummary({ ...applied, groupBy: groupBy.value }),
+    ])
     rows.value = result.items
+    groups.value = groupResult
     total.value = result.total
     summary.mealAllowanceCount = result.summary.mealAllowanceCount
     summary.determinedAmount = result.summary.determinedAmount
     summary.pendingAmountCount = result.summary.pendingAmountCount
   } catch (error) {
-    ElMessage.error(api.message(error, '加载餐补详情失败。'))
+    ElMessage.error(api.message(error, '加载餐补看板失败。'))
   } finally {
     loading.value = false
   }
 }
 
 function applyFilters() { filters.page = 1; load() }
+function selectGroup(group: DashboardGroupRow) {
+  if (groupBy.value === 'project') filters.projectId = filters.projectId === group.key ? '' : group.key
+  else filters.applicantId = filters.applicantId === group.key ? '' : group.key
+  applyFilters()
+}
 function openDetail(row: MealAllowanceListRow) { detailClaimId.value = row.claimId; detailOpen.value = true }
 
+watch(groupBy, () => load())
 onMounted(async () => { await loadOptions(); await load() })
 </script>
 
 <template>
   <section>
     <header class="page-header">
-      <div><p class="eyebrow">MEAL ALLOWANCE LEDGER</p><h1>餐补详情</h1><p>集中查看各报销当前版本的餐补，按行程时间、项目和人员快速筛选。</p></div>
+      <div><p class="eyebrow">MEAL ALLOWANCE BOARD</p><h1>餐补看板</h1><p>集中查看各报销当前版本的餐补，按行程时间、项目和人员快速筛选。</p></div>
       <div class="page-actions"><el-tooltip content="刷新餐补"><el-button circle :icon="Refresh" aria-label="刷新餐补" @click="load" /></el-tooltip></div>
     </header>
 
@@ -106,10 +119,18 @@ onMounted(async () => { await loadOptions(); await load() })
       <el-date-picker v-model="filters.dates" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="行程开始" end-placeholder="行程结束" @change="applyFilters" />
     </div>
 
-    <div class="meal-allowance-summary" aria-label="餐补汇总">
+    <div class="dashboard-summary" aria-label="餐补汇总">
       <div><span>餐补笔数</span><strong>{{ summary.mealAllowanceCount }}</strong></div>
-      <div class="meal-allowance-summary__amount"><span>已核定金额</span><strong>{{ money(summary.determinedAmount) }}</strong></div>
+      <div class="dashboard-summary__amount"><span>已核定金额</span><strong>{{ money(summary.determinedAmount) }}</strong></div>
       <div><span>金额待核定</span><strong>{{ summary.pendingAmountCount }} 笔</strong></div>
+      <div class="summary-mode"><span>划分方式</span><el-radio-group v-model="groupBy" size="small"><el-radio-button value="project">按项目</el-radio-button><el-radio-button value="applicant">按人员</el-radio-button></el-radio-group></div>
+    </div>
+
+    <div class="group-ledger" aria-label="餐补分组汇总">
+      <button v-for="group in groups" :key="group.key" type="button" :class="{ active: groupBy === 'project' ? filters.projectId === group.key : filters.applicantId === group.key }" @click="selectGroup(group)">
+        <span>{{ group.label }}</span><strong>{{ group.itemCount }} 笔</strong><em>已核定 {{ money(group.totalAmount) }}</em>
+      </button>
+      <p v-if="!loading && groups.length === 0">当前条件下没有可汇总的餐补。</p>
     </div>
 
     <div class="table-shell desktop-table" v-loading="loading">

@@ -243,13 +243,16 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 .admin-claim-filters > .el-select, .admin-claim-filters > .el-date-editor { width: 100%; }
 .meal-allowance-filters { display: grid; grid-template-columns: minmax(180px, 240px) minmax(180px, 240px) minmax(280px, 1fr); gap: 10px; align-items: center; margin: 20px 0 14px; }
 .meal-allowance-filters > .el-select, .meal-allowance-filters > .el-date-editor { width: 100%; }
-.meal-allowance-summary { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); min-height: 78px; margin-bottom: 12px; color: #f4f8f6; border-radius: 6px; background: var(--spruce); overflow: hidden; }
-.meal-allowance-summary > div { display: grid; align-content: center; gap: 5px; padding: 15px 20px; border-right: 1px solid #355a52; }
-.meal-allowance-summary > div:last-child { border-right: 0; }
-.meal-allowance-summary span { color: #a7bdb6; font-size: 11px; }
-.meal-allowance-summary strong { color: #d7e5e0; font-size: 20px; }
-.meal-allowance-summary__amount { background: #20483f; }
-.meal-allowance-summary__amount strong { color: #f0bd55; }
+.expense-dashboard-filters { display: grid; grid-template-columns: repeat(3, minmax(160px, 210px)) minmax(280px, 1fr); gap: 10px; align-items: center; margin: 20px 0 14px; }
+.expense-dashboard-filters > .el-select, .expense-dashboard-filters > .el-date-editor { width: 100%; }
+.dashboard-summary { display: grid; grid-template-columns: minmax(130px, .65fr) minmax(190px, 1fr) minmax(150px, .8fr) minmax(250px, auto); min-height: 78px; margin-bottom: 12px; color: #f4f8f6; border-radius: 6px; background: var(--spruce); overflow: hidden; }
+.dashboard-summary > div { display: grid; align-content: center; gap: 5px; padding: 15px 20px; border-right: 1px solid #355a52; }
+.dashboard-summary > div:last-child { border-right: 0; }
+.dashboard-summary span { color: #a7bdb6; font-size: 11px; }
+.dashboard-summary strong { color: #d7e5e0; font-size: 20px; }
+.dashboard-summary__amount { background: #20483f; }
+.dashboard-summary__amount strong { color: #f0bd55; }
+.dashboard-summary .summary-mode { grid-template-columns: 1fr auto; align-items: center; }
 .amount-pending { color: #9a6a16; font-size: 12px; }
 .claim-summary-band { display: grid; grid-template-columns: minmax(130px, .65fr) minmax(190px, 1fr) repeat(2, minmax(170px, .9fr)) minmax(250px, auto); min-height: 78px; margin: 0 0 12px; color: #f4f8f6; border-radius: 6px; background: var(--spruce); }
 .claim-summary-band > div { display: grid; align-content: center; gap: 5px; padding: 15px 20px; border-right: 1px solid #355a52; }
@@ -320,6 +323,10 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
   .admin-claim-filters > .el-date-editor { grid-column: 1 / -1; }
   .meal-allowance-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .meal-allowance-filters > .el-date-editor { grid-column: 1 / -1; }
+  .expense-dashboard-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .expense-dashboard-filters > .el-date-editor { grid-column: 1 / -1; }
+  .dashboard-summary { grid-template-columns: 1fr 1fr; }
+  .dashboard-summary > div:nth-child(2), .dashboard-summary > div:nth-child(4) { border-right: 0; }
   .claim-summary-band { grid-template-columns: 1fr 1fr; }
   .claim-summary-band > div:nth-child(2), .claim-summary-band > div:nth-child(4) { border-right: 0; }
   .claim-summary-band .summary-mode { grid-column: 1 / -1; border-top: 1px solid #355a52; }
@@ -379,9 +386,14 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
   .admin-claim-filters > .el-date-editor { grid-column: auto; }
   .meal-allowance-filters { grid-template-columns: 1fr; }
   .meal-allowance-filters > .el-date-editor { grid-column: auto; }
-  .meal-allowance-summary { grid-template-columns: 1fr; }
-  .meal-allowance-summary > div { border-right: 0; border-bottom: 1px solid #355a52; }
-  .meal-allowance-summary > div:last-child { border-bottom: 0; }
+  .expense-dashboard-filters { grid-template-columns: 1fr; }
+  .expense-dashboard-filters > .el-date-editor { grid-column: auto; }
+  .dashboard-summary { grid-template-columns: 1fr; }
+  .dashboard-summary > div { border-right: 0; border-bottom: 1px solid #355a52; }
+  .dashboard-summary > div:last-child { border-bottom: 0; }
+  .dashboard-summary .summary-mode .el-radio-group { display: flex; }
+  .dashboard-summary .summary-mode .el-radio-button { flex: 1; }
+  .dashboard-summary .summary-mode .el-radio-button__inner { width: 100%; padding-inline: 10px; }
   .claim-summary-band > div { padding: 14px; }
   .mobile-record__actions { flex-wrap: wrap; }
 }

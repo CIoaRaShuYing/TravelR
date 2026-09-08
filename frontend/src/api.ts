@@ -103,6 +103,29 @@ export type MealAllowanceListRow = {
   updatedAt: string
 }
 
+export type ExpenseItemDashboardRow = {
+  id: string
+  claimId: string
+  claimNumber: string
+  currentVersionId: string
+  versionNumber: number
+  projectId: string
+  projectCode: string
+  projectName: string
+  applicantId: string
+  applicantName: string
+  category: ExpenseCategory
+  amount?: number | null
+  currency: string
+  expenseDate?: string | null
+  merchant?: string | null
+  note?: string | null
+  claimStatus: ClaimStatus
+  updatedAt: string
+}
+
+export type DashboardGroupRow = { key: string; label: string; itemCount: number; totalAmount: number }
+
 export type Attachment = {
   id: string
   originalFileName: string
@@ -448,6 +471,9 @@ export const api = {
   listAdminClaims: (filters: { projectId?: string; applicantId?: string; status?: ClaimStatus; payoutStatus?: PayoutStatus; workQueue?: 'approval' | 'payout'; createdFrom?: string; createdTo?: string; page?: number; pageSize?: number }) => request<PagedResult<ClaimListRow> & { summary: { claimCount: number; totalAmount: number; reimbursementAmount: number; mealAllowanceAmount: number } }>(`/admin/claims${queryString(filters)}`),
   getClaimGroupSummary: (filters: { groupBy: 'project' | 'applicant'; projectId?: string; applicantId?: string; status?: ClaimStatus; payoutStatus?: PayoutStatus; workQueue?: 'approval' | 'payout'; createdFrom?: string; createdTo?: string }) => request<Array<{ key: string; label: string; claimCount: number; totalAmount: number }>>(`/admin/claims/group-summary${queryString(filters)}`),
   listAdminMealAllowances: (filters: { projectId?: string; applicantId?: string; tripFrom?: string; tripTo?: string; page?: number; pageSize?: number }) => request<PagedResult<MealAllowanceListRow> & { summary: { mealAllowanceCount: number; determinedAmount: number; pendingAmountCount: number } }>(`/admin/meal-allowances${queryString(filters)}`),
+  getMealAllowanceGroupSummary: (filters: { groupBy: 'project' | 'applicant'; projectId?: string; applicantId?: string; tripFrom?: string; tripTo?: string }) => request<DashboardGroupRow[]>(`/admin/meal-allowances/group-summary${queryString(filters)}`),
+  listAdminExpenseItems: (filters: { category?: ExpenseCategory; projectId?: string; applicantId?: string; expenseFrom?: string; expenseTo?: string; page?: number; pageSize?: number }) => request<PagedResult<ExpenseItemDashboardRow> & { summary: { expenseItemCount: number; totalAmount: number; pendingAmountCount: number } }>(`/admin/expense-items${queryString(filters)}`),
+  getExpenseItemGroupSummary: (filters: { groupBy: 'project' | 'applicant' | 'category'; category?: ExpenseCategory; projectId?: string; applicantId?: string; expenseFrom?: string; expenseTo?: string }) => request<DashboardGroupRow[]>(`/admin/expense-items/group-summary${queryString(filters)}`),
   reviewClaim: (claimId: string, versionId: string, action: 'approve' | 'reject', body: { expectedCurrentVersionId: string; concurrencyToken: string; comment?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/versions/${versionId}/${action}`, { method: 'POST', body: JSON.stringify(body) }),
   confirmPayout: (claimId: string, body: { expectedCurrentVersionId: string; concurrencyToken: string; note?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/payout/confirm`, { method: 'POST', body: JSON.stringify(body) }),
   reviewMealAllowance: (claimId: string, action: 'approve' | 'reject', body: { expectedCurrentVersionId: string; claimConcurrencyToken: string; mealConcurrencyToken: string; dailyAmount?: number; comment?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/meal-allowance/${action}`, { method: 'POST', body: JSON.stringify(body) }),

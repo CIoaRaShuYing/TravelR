@@ -978,6 +978,152 @@ admin.MapGet("/meal-allowances", async (Guid? projectId, Guid? applicantId, Date
     });
 });
 
+admin.MapGet("/meal-allowances/group-summary", async (string groupBy, Guid? projectId, Guid? applicantId, DateOnly? tripFrom, DateOnly? tripTo, AppDbContext db) =>
+{
+    if (!string.Equals(groupBy, "project", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(groupBy, "applicant", StringComparison.OrdinalIgnoreCase))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["groupBy"] = ["餐补划分方式必须是 project 或 applicant。"] });
+    if (tripFrom.HasValue && tripTo.HasValue && tripFrom.Value > tripTo.Value)
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["tripDates"] = ["行程开始日期不能晚于结束日期。"] });
+
+    var query = MealAllowanceLedgerQuery.Apply(
+        db.ReimbursementClaims.AsNoTracking(),
+        projectId,
+        applicantId,
+        tripFrom,
+        tripTo);
+    if (string.Equals(groupBy, "applicant", StringComparison.OrdinalIgnoreCase))
+    {
+        var groups = await query.GroupBy(x => new { x.ApplicantId, x.Applicant.DisplayName })
+            .Select(group => new
+            {
+                key = group.Key.ApplicantId,
+                label = group.Key.DisplayName,
+                itemCount = group.Count(),
+                totalAmount = group.Sum(x => x.CurrentVersion!.MealAllowance!.TotalAmount ?? 0m)
+            })
+            .OrderBy(x => x.label)
+            .ToListAsync();
+        return Results.Ok(groups);
+    }
+
+    var projectGroups = await query.GroupBy(x => new { x.CurrentVersion!.ProjectId, x.CurrentVersion.Project.Name })
+        .Select(group => new
+        {
+            key = group.Key.ProjectId,
+            label = group.Key.Name,
+            itemCount = group.Count(),
+            totalAmount = group.Sum(x => x.CurrentVersion!.MealAllowance!.TotalAmount ?? 0m)
+        })
+        .OrderBy(x => x.label)
+        .ToListAsync();
+    return Results.Ok(projectGroups);
+});
+
+admin.MapGet("/expense-items", async (ExpenseCategory? category, Guid? projectId, Guid? applicantId, DateOnly? expenseFrom, DateOnly? expenseTo, int? page, int? pageSize, AppDbContext db) =>
+{
+    if (expenseFrom.HasValue && expenseTo.HasValue && expenseFrom.Value > expenseTo.Value)
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["expenseDates"] = ["费用开始日期不能晚于结束日期。"] });
+
+    var paging = NormalizePaging(page, pageSize);
+    var query = ExpenseItemDashboardQuery.Apply(
+        db.ExpenseItems.AsNoTracking(),
+        category,
+        projectId,
+        applicantId,
+        expenseFrom,
+        expenseTo);
+    var total = await query.CountAsync();
+    var totalAmount = await query.SumAsync(x => x.Amount) ?? 0m;
+    var pendingAmountCount = await query.CountAsync(x => x.Amount == null);
+    var items = await query
+        .OrderByDescending(x => x.ExpenseDate)
+        .ThenByDescending(x => x.ClaimVersion.Claim.UpdatedAt)
+        .ThenBy(x => x.Id)
+        .Select(x => new ExpenseItemDashboardRow(
+            x.Id,
+            x.ClaimVersion.ClaimId,
+            x.ClaimVersion.Claim.ClaimNumber,
+            x.ClaimVersionId,
+            x.ClaimVersion.VersionNumber,
+            x.ClaimVersion.ProjectId,
+            x.ClaimVersion.ProjectCodeSnapshot,
+            x.ClaimVersion.ProjectNameSnapshot,
+            x.ClaimVersion.Claim.ApplicantId,
+            x.ClaimVersion.Claim.Applicant.DisplayName,
+            x.Category,
+            x.Amount,
+            x.Currency,
+            x.ExpenseDate,
+            x.Merchant,
+            x.Note,
+            x.ClaimVersion.Claim.Status,
+            x.ClaimVersion.Claim.UpdatedAt))
+        .Skip((paging.Page - 1) * paging.PageSize)
+        .Take(paging.PageSize)
+        .ToListAsync();
+    return Results.Ok(new
+    {
+        items,
+        page = paging.Page,
+        pageSize = paging.PageSize,
+        total,
+        summary = new { expenseItemCount = total, totalAmount, pendingAmountCount }
+    });
+});
+
+admin.MapGet("/expense-items/group-summary", async (string groupBy, ExpenseCategory? category, Guid? projectId, Guid? applicantId, DateOnly? expenseFrom, DateOnly? expenseTo, AppDbContext db) =>
+{
+    if (!string.Equals(groupBy, "project", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(groupBy, "applicant", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(groupBy, "category", StringComparison.OrdinalIgnoreCase))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["groupBy"] = ["报销划分方式必须是 project、applicant 或 category。"] });
+    if (expenseFrom.HasValue && expenseTo.HasValue && expenseFrom.Value > expenseTo.Value)
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["expenseDates"] = ["费用开始日期不能晚于结束日期。"] });
+
+    var query = ExpenseItemDashboardQuery.Apply(
+        db.ExpenseItems.AsNoTracking(),
+        category,
+        projectId,
+        applicantId,
+        expenseFrom,
+        expenseTo);
+    if (string.Equals(groupBy, "category", StringComparison.OrdinalIgnoreCase))
+    {
+        var groups = await query.GroupBy(x => x.Category)
+            .Select(group => new { key = group.Key, label = group.Key, itemCount = group.Count(), totalAmount = group.Sum(x => x.Amount ?? 0m) })
+            .OrderBy(x => x.key)
+            .ToListAsync();
+        return Results.Ok(groups);
+    }
+    if (string.Equals(groupBy, "applicant", StringComparison.OrdinalIgnoreCase))
+    {
+        var groups = await query.GroupBy(x => new { x.ClaimVersion.Claim.ApplicantId, x.ClaimVersion.Claim.Applicant.DisplayName })
+            .Select(group => new
+            {
+                key = group.Key.ApplicantId,
+                label = group.Key.DisplayName,
+                itemCount = group.Count(),
+                totalAmount = group.Sum(x => x.Amount ?? 0m)
+            })
+            .OrderBy(x => x.label)
+            .ToListAsync();
+        return Results.Ok(groups);
+    }
+
+    var projectGroups = await query.GroupBy(x => new { x.ClaimVersion.ProjectId, x.ClaimVersion.Project.Name })
+        .Select(group => new
+        {
+            key = group.Key.ProjectId,
+            label = group.Key.Name,
+            itemCount = group.Count(),
+            totalAmount = group.Sum(x => x.Amount ?? 0m)
+        })
+        .OrderBy(x => x.label)
+        .ToListAsync();
+    return Results.Ok(projectGroups);
+});
+
 admin.MapPost("/claims/{id:guid}/versions/{versionId:guid}/approve", async (Guid id, Guid versionId, ReviewClaimRequest request, ClaimWorkflowService workflow, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
 {
     if (request.ExpectedCurrentVersionId != versionId) throw new ApiProblemException(409, "CLAIM_VERSION_STALE", "审批版本与当前版本不一致。");
@@ -1247,6 +1393,26 @@ public sealed record MealAllowanceListRow(
     decimal? TotalAmount,
     MealAllowanceStatus Status,
     PayoutStatus PayoutStatus,
+    DateTimeOffset UpdatedAt);
+
+public sealed record ExpenseItemDashboardRow(
+    Guid Id,
+    Guid ClaimId,
+    string ClaimNumber,
+    Guid CurrentVersionId,
+    int VersionNumber,
+    Guid ProjectId,
+    string ProjectCode,
+    string ProjectName,
+    Guid ApplicantId,
+    string ApplicantName,
+    ExpenseCategory Category,
+    decimal? Amount,
+    string Currency,
+    DateOnly? ExpenseDate,
+    string? Merchant,
+    string? Note,
+    ClaimStatus ClaimStatus,
     DateTimeOffset UpdatedAt);
 
 public sealed record WeeklyReportRow(

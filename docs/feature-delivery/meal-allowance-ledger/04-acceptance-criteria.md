@@ -1,9 +1,9 @@
-# 餐补详情台账：验收标准
+# 餐补看板：验收标准
 
 ## AC-001：路由与权限
 
 Requirement: REQ-001
-Acceptance criteria: 管理员导航出现“餐补详情”，点击进入 `/admin/meal-allowances`；普通申请人无法从导航看到且直接访问会被前端守卫拦截；后端 API 同样要求 Administrator。
+Acceptance criteria: 管理员导航出现“餐补看板”，点击进入 `/admin/meal-allowances`；普通申请人无法从导航看到且直接访问会被前端守卫拦截；后端 API 同样要求 Administrator。
 Verification method: 路由与权限代码检查、前端构建、管理员/申请人浏览器验证。
 Test data: 一个 Administrator、一个 Applicant。
 Risk: 只做前端隐藏会造成越权。

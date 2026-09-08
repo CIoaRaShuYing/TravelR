@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Calendar, Coin, CreditCard, DocumentChecked, FolderOpened, Key, Memo, Menu, Setting, SwitchButton, Tickets, User, UserFilled } from '@element-plus/icons-vue'
+import { Calendar, Coin, CreditCard, DataAnalysis, DocumentChecked, FolderOpened, Key, Memo, Menu, Setting, SwitchButton, Tickets, User, UserFilled } from '@element-plus/icons-vue'
 import { clearSession, isAdministrator, profileIncomplete, session } from '../session'
 
 const route = useRoute()
@@ -18,7 +18,8 @@ const navItems = computed(() => [
   { path: '/admin/registrations', label: '注册审批', icon: User, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/projects', label: '项目管理', icon: FolderOpened, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/claims', label: '报销管理', icon: DocumentChecked, visible: isAdministrator.value && !profileIncomplete.value },
-  { path: '/admin/meal-allowances', label: '餐补详情', icon: Coin, visible: isAdministrator.value && !profileIncomplete.value },
+  { path: '/admin/reimbursement-dashboard', label: '报销看板', icon: DataAnalysis, visible: isAdministrator.value && !profileIncomplete.value },
+  { path: '/admin/meal-allowances', label: '餐补看板', icon: Coin, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/settings', label: '注册策略', icon: Setting, visible: isAdministrator.value && !profileIncomplete.value },
 ].filter(item => item.visible))
 
