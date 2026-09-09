@@ -83,6 +83,19 @@ public sealed record ConfirmMealAllowancePayoutRequest(
     Guid MealConcurrencyToken,
     [property: StringLength(1000)] string? Note);
 
+public sealed record ClaimArchiveRangeRequest(
+    DateOnly SubmittedFrom,
+    DateOnly SubmittedTo);
+
+public sealed record CreateClaimArchiveBatchRequest(
+    [property: Required, StringLength(200)] string Name,
+    DateOnly SubmittedFrom,
+    DateOnly SubmittedTo);
+
+public sealed record RenameClaimArchiveBatchRequest(
+    [property: Required, StringLength(200)] string Name,
+    Guid ConcurrencyToken);
+
 public sealed record CreateWeeklyReportRequest(
     Guid ProjectId,
     DateOnly WeekStart,

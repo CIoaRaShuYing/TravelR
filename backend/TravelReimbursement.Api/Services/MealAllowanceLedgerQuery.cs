@@ -9,7 +9,9 @@ public static class MealAllowanceLedgerQuery
         Guid? projectId,
         Guid? applicantId,
         DateOnly? tripFrom,
-        DateOnly? tripTo)
+        DateOnly? tripTo,
+        string? archiveState = null,
+        Guid? archiveBatchId = null)
     {
         query = query.Where(claim => claim.CurrentVersion != null && claim.CurrentVersion.MealAllowance != null);
         if (projectId.HasValue)
@@ -20,6 +22,7 @@ public static class MealAllowanceLedgerQuery
             query = query.Where(claim => claim.CurrentVersion!.MealAllowance!.ReturnDate >= tripFrom.Value);
         if (tripTo.HasValue)
             query = query.Where(claim => claim.CurrentVersion!.MealAllowance!.DepartureDate <= tripTo.Value);
+        query = ArchiveQueryFilter.Apply(query, archiveState, archiveBatchId);
         return query;
     }
 }

@@ -10,7 +10,9 @@ public static class ExpenseItemDashboardQuery
         Guid? projectId,
         Guid? applicantId,
         DateOnly? expenseFrom,
-        DateOnly? expenseTo)
+        DateOnly? expenseTo,
+        string? archiveState = null,
+        Guid? archiveBatchId = null)
     {
         query = query.Where(item =>
             item.ClaimVersion.Claim.CurrentVersionId == item.ClaimVersionId
@@ -28,6 +30,12 @@ public static class ExpenseItemDashboardQuery
             query = query.Where(item => item.ExpenseDate >= expenseFrom.Value);
         if (expenseTo.HasValue)
             query = query.Where(item => item.ExpenseDate <= expenseTo.Value);
+        if (archiveBatchId.HasValue)
+            query = query.Where(item => item.ClaimVersion.Claim.ArchiveBatchId == archiveBatchId.Value);
+        else if (archiveState?.Equals("archived", StringComparison.OrdinalIgnoreCase) == true)
+            query = query.Where(item => item.ClaimVersion.Claim.ArchiveBatchId != null);
+        else if (archiveState?.Equals("unarchived", StringComparison.OrdinalIgnoreCase) == true)
+            query = query.Where(item => item.ClaimVersion.Claim.ArchiveBatchId == null);
         return query;
     }
 }

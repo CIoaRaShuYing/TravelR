@@ -40,4 +40,24 @@ public sealed class BusinessModelTests
         var itemOrderIndex = itemEntity.GetIndexes().Single(index => index.IsUnique);
         Assert.Equal(new[] { nameof(MeetingRecordItem.MeetingRecordId), nameof(MeetingRecordItem.SortOrder) }, itemOrderIndex.Properties.Select(property => property.Name));
     }
+
+    [Fact]
+    public void Claim_archive_batch_has_unique_name_and_restricts_member_deletion()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseNpgsql("Host=localhost;Database=model_only;Username=model_only;Password=model_only")
+            .Options;
+        using var db = new AppDbContext(options);
+
+        var batchEntity = db.Model.FindEntityType(typeof(ClaimArchiveBatch))!;
+        var claimEntity = db.Model.FindEntityType(typeof(ReimbursementClaim))!;
+        var normalizedNameIndex = batchEntity.GetIndexes().Single(index => index.IsUnique);
+        var archiveForeignKey = claimEntity.GetForeignKeys().Single(key => key.PrincipalEntityType.ClrType == typeof(ClaimArchiveBatch));
+
+        Assert.Equal(new[] { nameof(ClaimArchiveBatch.NormalizedName) }, normalizedNameIndex.Properties.Select(property => property.Name));
+        Assert.Equal(nameof(ReimbursementClaim.ArchiveBatchId), archiveForeignKey.Properties.Single().Name);
+        Assert.Equal(DeleteBehavior.Restrict, archiveForeignKey.DeleteBehavior);
+        Assert.True(batchEntity.FindProperty(nameof(ClaimArchiveBatch.ConcurrencyToken))!.IsConcurrencyToken);
+        Assert.True(claimEntity.FindProperty(nameof(ReimbursementClaim.ConcurrencyToken))!.IsConcurrencyToken);
+    }
 }

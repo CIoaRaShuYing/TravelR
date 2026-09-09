@@ -11,6 +11,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<SystemSettings> SystemSettings => Set<SystemSettings>();
     public DbSet<RegistrationRequest> RegistrationRequests => Set<RegistrationRequest>();
     public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ClaimArchiveBatch> ClaimArchiveBatches => Set<ClaimArchiveBatch>();
     public DbSet<ReimbursementClaim> ReimbursementClaims => Set<ReimbursementClaim>();
     public DbSet<ClaimVersion> ClaimVersions => Set<ClaimVersion>();
     public DbSet<TravelItinerary> TravelItineraries => Set<TravelItinerary>();
@@ -65,18 +66,32 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.Property(x => x.Description).HasMaxLength(1000);
             entity.Property(x => x.ConcurrencyToken).IsConcurrencyToken();
         });
+        builder.Entity<ClaimArchiveBatch>(entity =>
+        {
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_ClaimArchiveBatches_SubmittedRange",
+                "\"SubmittedTo\" >= \"SubmittedFrom\""));
+            entity.HasIndex(x => x.NormalizedName).IsUnique();
+            entity.HasIndex(x => x.CreatedAt);
+            entity.Property(x => x.Name).HasMaxLength(200);
+            entity.Property(x => x.NormalizedName).HasMaxLength(200);
+            entity.Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+            entity.HasOne(x => x.CreatedBy).WithMany().HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.Restrict);
+        });
         builder.Entity<ReimbursementClaim>(entity =>
         {
             entity.HasIndex(x => x.ClaimNumber).IsUnique();
             entity.HasIndex(x => x.CurrentVersionId).IsUnique();
             entity.HasIndex(x => new { x.ApplicantId, x.Status, x.UpdatedAt });
             entity.HasIndex(x => new { x.PayoutStatus, x.UpdatedAt });
+            entity.HasIndex(x => new { x.ArchiveBatchId, x.SubmittedAt });
             entity.Property(x => x.ClaimNumber).HasMaxLength(32);
             entity.Property(x => x.Type).HasConversion<string>().HasMaxLength(16);
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
             entity.Property(x => x.PayoutStatus).HasConversion<string>().HasMaxLength(16);
             entity.Property(x => x.ConcurrencyToken).IsConcurrencyToken();
             entity.HasOne(x => x.Applicant).WithMany().HasForeignKey(x => x.ApplicantId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ArchiveBatch).WithMany(x => x.Claims).HasForeignKey(x => x.ArchiveBatchId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.CurrentVersion).WithOne().HasForeignKey<ReimbursementClaim>(x => x.CurrentVersionId).OnDelete(DeleteBehavior.Restrict);
             entity.HasMany(x => x.Versions).WithOne(x => x.Claim).HasForeignKey(x => x.ClaimId).OnDelete(DeleteBehavior.Cascade);
         });

@@ -54,6 +54,20 @@ public sealed class ExpenseItemDashboardQueryTests
         Assert.Equal(new[] { submitted, approved, rejected }, result);
     }
 
+    [Fact]
+    public void Apply_filters_expenses_by_archive_state()
+    {
+        var archived = Expense(ClaimStatus.Approved, ExpenseCategory.Other, Guid.NewGuid(), Guid.NewGuid(), new DateOnly(2026, 9, 1));
+        archived.ClaimVersion.Claim.ArchiveBatchId = Guid.NewGuid();
+        var unarchived = Expense(ClaimStatus.Approved, ExpenseCategory.Other, Guid.NewGuid(), Guid.NewGuid(), new DateOnly(2026, 9, 1));
+
+        var result = ExpenseItemDashboardQuery.Apply(
+            new[] { archived, unarchived }.AsQueryable(),
+            null, null, null, null, null, "unarchived").ToList();
+
+        Assert.Equal(new[] { unarchived }, result);
+    }
+
     private static ExpenseItem Expense(
         ClaimStatus status,
         ExpenseCategory category,

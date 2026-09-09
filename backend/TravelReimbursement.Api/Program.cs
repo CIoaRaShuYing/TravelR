@@ -72,6 +72,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddDataProtection().SetApplicationName("TravelReimbursement");
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ClaimWorkflowService>();
+builder.Services.AddScoped<ClaimArchiveService>();
 builder.Services.AddScoped<MonthlyClaimExportService>();
 builder.Services.AddScoped<WeeklyReportExportService>();
 builder.Services.AddScoped<MeetingRecordService>();
@@ -858,21 +859,57 @@ admin.MapPost("/projects/{id:guid}/{action:regex(^enable|disable$)}", async (Gui
     return Results.Ok(new { project.Id, project.IsActive, project.ConcurrencyToken });
 });
 
-admin.MapGet("/claims", async (Guid? projectId, Guid? applicantId, ClaimStatus? status, PayoutStatus? payoutStatus, string? workQueue, DateTimeOffset? createdFrom, DateTimeOffset? createdTo, int? page, int? pageSize, AppDbContext db) =>
+admin.MapGet("/claim-archive-batches", async (ClaimArchiveService archiveService, CancellationToken cancellationToken) =>
+    Results.Ok(await archiveService.ListAsync(cancellationToken)));
+admin.MapGet("/claim-archive-batches/{id:guid}", async (Guid id, ClaimArchiveService archiveService, CancellationToken cancellationToken) =>
+    Results.Ok(await archiveService.GetAsync(id, cancellationToken)));
+admin.MapPost("/claim-archive-batches/preview", async (ClaimArchiveRangeRequest request, ClaimArchiveService archiveService, CancellationToken cancellationToken) =>
+    Results.Ok(await archiveService.PreviewAsync(request.SubmittedFrom, request.SubmittedTo, cancellationToken)));
+admin.MapPost("/claim-archive-batches", async (CreateClaimArchiveBatchRequest request, ClaimArchiveService archiveService, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
 {
+    var batch = await archiveService.CreateAsync(GetUserId(principal), request, context.TraceIdentifier, cancellationToken);
+    return Results.Created($"/api/admin/claim-archive-batches/{batch.Id}", batch);
+});
+admin.MapPut("/claim-archive-batches/{id:guid}/name", async (Guid id, RenameClaimArchiveBatchRequest request, ClaimArchiveService archiveService, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+    Results.Ok(await archiveService.RenameAsync(GetUserId(principal), id, request, context.TraceIdentifier, cancellationToken)));
+admin.MapGet("/claim-archive-batches/{id:guid}/export.zip", async (Guid id, MonthlyClaimExportService exportService, AppDbContext db, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    var result = await exportService.CreateBatchArchiveAsync(id, cancellationToken);
+    try
+    {
+        await AuditAsync(db, GetUserId(principal), "ClaimArchiveBatchExported", "ClaimArchiveBatch", id.ToString(), context.TraceIdentifier, System.Text.Json.JsonSerializer.Serialize(new { result.From, result.To, result.ClaimCount, result.AttachmentCount }));
+        await db.SaveChangesAsync(cancellationToken);
+    }
+    catch
+    {
+        await result.Content.DisposeAsync();
+        throw;
+    }
+    return Results.File(result.Content, "application/zip", result.FileName);
+});
+
+admin.MapGet("/claims", async (Guid? projectId, Guid? applicantId, ClaimStatus? status, PayoutStatus? payoutStatus, string? workQueue, DateTimeOffset? createdFrom, DateTimeOffset? createdTo, string? archiveState, Guid? archiveBatchId, int? page, int? pageSize, AppDbContext db) =>
+{
+    if (!ArchiveQueryFilter.IsValidState(archiveState))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["archiveState"] = ["归档状态必须是 all、archived 或 unarchived。"] });
     var paging = NormalizePaging(page, pageSize);
     var query = db.ReimbursementClaims.AsNoTracking().AsQueryable();
     if (projectId.HasValue) query = query.Where(x => x.CurrentVersion!.ProjectId == projectId.Value);
     if (applicantId.HasValue) query = query.Where(x => x.ApplicantId == applicantId.Value);
     if (string.Equals(workQueue, "approval", StringComparison.OrdinalIgnoreCase))
-        query = query.Where(x => x.Status == ClaimStatus.Submitted || x.CurrentVersion!.MealAllowance!.Status == MealAllowanceStatus.PendingReview);
+        query = query.Where(x => x.ArchiveBatchId == null
+            && (x.Status == ClaimStatus.Submitted || x.CurrentVersion!.MealAllowance!.Status == MealAllowanceStatus.PendingReview));
     else if (string.Equals(workQueue, "payout", StringComparison.OrdinalIgnoreCase))
-        query = query.Where(x => (x.Status == ClaimStatus.Approved && x.PayoutStatus == PayoutStatus.Pending)
-            || (x.CurrentVersion!.MealAllowance!.Status == MealAllowanceStatus.Approved && x.CurrentVersion.MealAllowance.PayoutStatus == PayoutStatus.Pending));
+        query = query.Where(x => x.ArchiveBatchId == null
+            && ((x.Status == ClaimStatus.Approved && x.PayoutStatus == PayoutStatus.Pending)
+                || (x.CurrentVersion!.MealAllowance!.Status == MealAllowanceStatus.Approved && x.CurrentVersion.MealAllowance.PayoutStatus == PayoutStatus.Pending)));
     else
     {
-        if (status.HasValue) query = query.Where(x => x.Status == status.Value); else query = query.Where(x => x.Status != ClaimStatus.Cancelled);
+        if (status.HasValue) query = query.Where(x => x.Status == status.Value);
+        else if (!archiveBatchId.HasValue && !string.Equals(archiveState, "archived", StringComparison.OrdinalIgnoreCase))
+            query = query.Where(x => x.Status != ClaimStatus.Cancelled);
         if (payoutStatus.HasValue) query = query.Where(x => x.PayoutStatus == payoutStatus.Value);
+        query = ArchiveQueryFilter.Apply(query, archiveState, archiveBatchId);
     }
     if (createdFrom.HasValue) query = query.Where(x => x.CreatedAt >= createdFrom.Value);
     if (createdTo.HasValue) query = query.Where(x => x.CreatedAt < createdTo.Value.AddDays(1));
@@ -884,23 +921,50 @@ admin.MapGet("/claims", async (Guid? projectId, Guid? applicantId, ClaimStatus? 
     return Results.Ok(new { items, page = paging.Page, pageSize = paging.PageSize, total, summary = new { claimCount = total, totalAmount, reimbursementAmount, mealAllowanceAmount } });
 });
 
-admin.MapGet("/claims/group-summary", async (string groupBy, Guid? projectId, Guid? applicantId, ClaimStatus? status, PayoutStatus? payoutStatus, string? workQueue, DateTimeOffset? createdFrom, DateTimeOffset? createdTo, AppDbContext db) =>
+admin.MapGet("/claims/group-summary", async (string groupBy, Guid? projectId, Guid? applicantId, ClaimStatus? status, PayoutStatus? payoutStatus, string? workQueue, DateTimeOffset? createdFrom, DateTimeOffset? createdTo, string? archiveState, Guid? archiveBatchId, AppDbContext db) =>
 {
+    if (!string.Equals(groupBy, "project", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(groupBy, "applicant", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(groupBy, "archiveBatch", StringComparison.OrdinalIgnoreCase))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["groupBy"] = ["报销划分方式必须是 project、applicant 或 archiveBatch。"] });
+    if (!ArchiveQueryFilter.IsValidState(archiveState))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["archiveState"] = ["归档状态必须是 all、archived 或 unarchived。"] });
     var query = db.ReimbursementClaims.AsNoTracking().AsQueryable();
     if (projectId.HasValue) query = query.Where(x => x.CurrentVersion!.ProjectId == projectId.Value);
     if (applicantId.HasValue) query = query.Where(x => x.ApplicantId == applicantId.Value);
     if (string.Equals(workQueue, "approval", StringComparison.OrdinalIgnoreCase))
-        query = query.Where(x => x.Status == ClaimStatus.Submitted || x.CurrentVersion!.MealAllowance!.Status == MealAllowanceStatus.PendingReview);
+        query = query.Where(x => x.ArchiveBatchId == null
+            && (x.Status == ClaimStatus.Submitted || x.CurrentVersion!.MealAllowance!.Status == MealAllowanceStatus.PendingReview));
     else if (string.Equals(workQueue, "payout", StringComparison.OrdinalIgnoreCase))
-        query = query.Where(x => (x.Status == ClaimStatus.Approved && x.PayoutStatus == PayoutStatus.Pending)
-            || (x.CurrentVersion!.MealAllowance!.Status == MealAllowanceStatus.Approved && x.CurrentVersion.MealAllowance.PayoutStatus == PayoutStatus.Pending));
+        query = query.Where(x => x.ArchiveBatchId == null
+            && ((x.Status == ClaimStatus.Approved && x.PayoutStatus == PayoutStatus.Pending)
+                || (x.CurrentVersion!.MealAllowance!.Status == MealAllowanceStatus.Approved && x.CurrentVersion.MealAllowance.PayoutStatus == PayoutStatus.Pending)));
     else
     {
-        if (status.HasValue) query = query.Where(x => x.Status == status.Value); else query = query.Where(x => x.Status != ClaimStatus.Cancelled);
+        if (status.HasValue) query = query.Where(x => x.Status == status.Value);
+        else if (!archiveBatchId.HasValue
+            && !string.Equals(archiveState, "archived", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(groupBy, "archiveBatch", StringComparison.OrdinalIgnoreCase))
+            query = query.Where(x => x.Status != ClaimStatus.Cancelled);
         if (payoutStatus.HasValue) query = query.Where(x => x.PayoutStatus == payoutStatus.Value);
+        query = ArchiveQueryFilter.Apply(query, archiveState, archiveBatchId);
     }
     if (createdFrom.HasValue) query = query.Where(x => x.CreatedAt >= createdFrom.Value);
     if (createdTo.HasValue) query = query.Where(x => x.CreatedAt < createdTo.Value.AddDays(1));
+    if (string.Equals(groupBy, "archiveBatch", StringComparison.OrdinalIgnoreCase))
+    {
+        var groups = await query.GroupBy(x => new { x.ArchiveBatchId, Name = x.ArchiveBatch != null ? x.ArchiveBatch.Name : "未归档" })
+            .Select(g => new
+            {
+                key = g.Key.ArchiveBatchId,
+                label = g.Key.Name,
+                claimCount = g.Count(),
+                reimbursementAmount = g.Sum(x => x.CurrentVersion!.TotalAmount),
+                mealAllowanceAmount = g.Sum(x => x.CurrentVersion!.MealAllowance!.TotalAmount ?? 0m)
+            })
+            .OrderBy(x => x.label).ToListAsync();
+        return Results.Ok(groups.Select(x => new { x.key, x.label, x.claimCount, totalAmount = x.reimbursementAmount + x.mealAllowanceAmount }));
+    }
     if (string.Equals(groupBy, "applicant", StringComparison.OrdinalIgnoreCase))
     {
         var groups = await query.GroupBy(x => new { x.ApplicantId, x.Applicant.DisplayName })
@@ -928,8 +992,10 @@ admin.MapGet("/claims/group-summary", async (string groupBy, Guid? projectId, Gu
     return Results.Ok(projectGroups.Select(x => new { x.key, x.label, x.claimCount, totalAmount = x.reimbursementAmount + x.mealAllowanceAmount }));
 });
 
-admin.MapGet("/meal-allowances", async (Guid? projectId, Guid? applicantId, DateOnly? tripFrom, DateOnly? tripTo, int? page, int? pageSize, AppDbContext db) =>
+admin.MapGet("/meal-allowances", async (Guid? projectId, Guid? applicantId, DateOnly? tripFrom, DateOnly? tripTo, string? archiveState, Guid? archiveBatchId, int? page, int? pageSize, AppDbContext db) =>
 {
+    if (!ArchiveQueryFilter.IsValidState(archiveState))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["archiveState"] = ["归档状态必须是 all、archived 或 unarchived。"] });
     if (tripFrom.HasValue && tripTo.HasValue && tripFrom.Value > tripTo.Value)
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["tripDates"] = ["行程开始日期不能晚于结束日期。"] });
 
@@ -939,7 +1005,9 @@ admin.MapGet("/meal-allowances", async (Guid? projectId, Guid? applicantId, Date
         projectId,
         applicantId,
         tripFrom,
-        tripTo);
+        tripTo,
+        archiveState,
+        archiveBatchId);
     var total = await query.CountAsync();
     var determinedAmount = await query.SumAsync(x => x.CurrentVersion!.MealAllowance!.TotalAmount) ?? 0m;
     var pendingAmountCount = await query.CountAsync(x => x.CurrentVersion!.MealAllowance!.TotalAmount == null);
@@ -964,6 +1032,8 @@ admin.MapGet("/meal-allowances", async (Guid? projectId, Guid? applicantId, Date
             x.CurrentVersion.MealAllowance.TotalAmount,
             x.CurrentVersion.MealAllowance.Status,
             x.CurrentVersion.MealAllowance.PayoutStatus,
+            x.ArchiveBatchId,
+            x.ArchiveBatch != null ? x.ArchiveBatch.Name : null,
             x.CurrentVersion.MealAllowance.UpdatedAt))
         .Skip((paging.Page - 1) * paging.PageSize)
         .Take(paging.PageSize)
@@ -978,11 +1048,14 @@ admin.MapGet("/meal-allowances", async (Guid? projectId, Guid? applicantId, Date
     });
 });
 
-admin.MapGet("/meal-allowances/group-summary", async (string groupBy, Guid? projectId, Guid? applicantId, DateOnly? tripFrom, DateOnly? tripTo, AppDbContext db) =>
+admin.MapGet("/meal-allowances/group-summary", async (string groupBy, Guid? projectId, Guid? applicantId, DateOnly? tripFrom, DateOnly? tripTo, string? archiveState, Guid? archiveBatchId, AppDbContext db) =>
 {
     if (!string.Equals(groupBy, "project", StringComparison.OrdinalIgnoreCase)
-        && !string.Equals(groupBy, "applicant", StringComparison.OrdinalIgnoreCase))
-        return Results.ValidationProblem(new Dictionary<string, string[]> { ["groupBy"] = ["餐补划分方式必须是 project 或 applicant。"] });
+        && !string.Equals(groupBy, "applicant", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(groupBy, "archiveBatch", StringComparison.OrdinalIgnoreCase))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["groupBy"] = ["餐补划分方式必须是 project、applicant 或 archiveBatch。"] });
+    if (!ArchiveQueryFilter.IsValidState(archiveState))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["archiveState"] = ["归档状态必须是 all、archived 或 unarchived。"] });
     if (tripFrom.HasValue && tripTo.HasValue && tripFrom.Value > tripTo.Value)
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["tripDates"] = ["行程开始日期不能晚于结束日期。"] });
 
@@ -991,7 +1064,23 @@ admin.MapGet("/meal-allowances/group-summary", async (string groupBy, Guid? proj
         projectId,
         applicantId,
         tripFrom,
-        tripTo);
+        tripTo,
+        archiveState,
+        archiveBatchId);
+    if (string.Equals(groupBy, "archiveBatch", StringComparison.OrdinalIgnoreCase))
+    {
+        var groups = await query.GroupBy(x => new { x.ArchiveBatchId, Name = x.ArchiveBatch != null ? x.ArchiveBatch.Name : "未归档" })
+            .Select(group => new
+            {
+                key = group.Key.ArchiveBatchId,
+                label = group.Key.Name,
+                itemCount = group.Count(),
+                totalAmount = group.Sum(x => x.CurrentVersion!.MealAllowance!.TotalAmount ?? 0m)
+            })
+            .OrderBy(x => x.label)
+            .ToListAsync();
+        return Results.Ok(groups);
+    }
     if (string.Equals(groupBy, "applicant", StringComparison.OrdinalIgnoreCase))
     {
         var groups = await query.GroupBy(x => new { x.ApplicantId, x.Applicant.DisplayName })
@@ -1020,8 +1109,10 @@ admin.MapGet("/meal-allowances/group-summary", async (string groupBy, Guid? proj
     return Results.Ok(projectGroups);
 });
 
-admin.MapGet("/expense-items", async (ExpenseCategory? category, Guid? projectId, Guid? applicantId, DateOnly? expenseFrom, DateOnly? expenseTo, int? page, int? pageSize, AppDbContext db) =>
+admin.MapGet("/expense-items", async (ExpenseCategory? category, Guid? projectId, Guid? applicantId, DateOnly? expenseFrom, DateOnly? expenseTo, string? archiveState, Guid? archiveBatchId, int? page, int? pageSize, AppDbContext db) =>
 {
+    if (!ArchiveQueryFilter.IsValidState(archiveState))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["archiveState"] = ["归档状态必须是 all、archived 或 unarchived。"] });
     if (expenseFrom.HasValue && expenseTo.HasValue && expenseFrom.Value > expenseTo.Value)
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["expenseDates"] = ["费用开始日期不能晚于结束日期。"] });
 
@@ -1032,7 +1123,9 @@ admin.MapGet("/expense-items", async (ExpenseCategory? category, Guid? projectId
         projectId,
         applicantId,
         expenseFrom,
-        expenseTo);
+        expenseTo,
+        archiveState,
+        archiveBatchId);
     var total = await query.CountAsync();
     var totalAmount = await query.SumAsync(x => x.Amount) ?? 0m;
     var pendingAmountCount = await query.CountAsync(x => x.Amount == null);
@@ -1058,6 +1151,8 @@ admin.MapGet("/expense-items", async (ExpenseCategory? category, Guid? projectId
             x.Merchant,
             x.Note,
             x.ClaimVersion.Claim.Status,
+            x.ClaimVersion.Claim.ArchiveBatchId,
+            x.ClaimVersion.Claim.ArchiveBatch != null ? x.ClaimVersion.Claim.ArchiveBatch.Name : null,
             x.ClaimVersion.Claim.UpdatedAt))
         .Skip((paging.Page - 1) * paging.PageSize)
         .Take(paging.PageSize)
@@ -1072,12 +1167,15 @@ admin.MapGet("/expense-items", async (ExpenseCategory? category, Guid? projectId
     });
 });
 
-admin.MapGet("/expense-items/group-summary", async (string groupBy, ExpenseCategory? category, Guid? projectId, Guid? applicantId, DateOnly? expenseFrom, DateOnly? expenseTo, AppDbContext db) =>
+admin.MapGet("/expense-items/group-summary", async (string groupBy, ExpenseCategory? category, Guid? projectId, Guid? applicantId, DateOnly? expenseFrom, DateOnly? expenseTo, string? archiveState, Guid? archiveBatchId, AppDbContext db) =>
 {
     if (!string.Equals(groupBy, "project", StringComparison.OrdinalIgnoreCase)
         && !string.Equals(groupBy, "applicant", StringComparison.OrdinalIgnoreCase)
-        && !string.Equals(groupBy, "category", StringComparison.OrdinalIgnoreCase))
-        return Results.ValidationProblem(new Dictionary<string, string[]> { ["groupBy"] = ["报销划分方式必须是 project、applicant 或 category。"] });
+        && !string.Equals(groupBy, "category", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(groupBy, "archiveBatch", StringComparison.OrdinalIgnoreCase))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["groupBy"] = ["报销划分方式必须是 project、applicant、category 或 archiveBatch。"] });
+    if (!ArchiveQueryFilter.IsValidState(archiveState))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["archiveState"] = ["归档状态必须是 all、archived 或 unarchived。"] });
     if (expenseFrom.HasValue && expenseTo.HasValue && expenseFrom.Value > expenseTo.Value)
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["expenseDates"] = ["费用开始日期不能晚于结束日期。"] });
 
@@ -1087,7 +1185,27 @@ admin.MapGet("/expense-items/group-summary", async (string groupBy, ExpenseCateg
         projectId,
         applicantId,
         expenseFrom,
-        expenseTo);
+        expenseTo,
+        archiveState,
+        archiveBatchId);
+    if (string.Equals(groupBy, "archiveBatch", StringComparison.OrdinalIgnoreCase))
+    {
+        var groups = await query.GroupBy(x => new
+            {
+                x.ClaimVersion.Claim.ArchiveBatchId,
+                Name = x.ClaimVersion.Claim.ArchiveBatch != null ? x.ClaimVersion.Claim.ArchiveBatch.Name : "未归档"
+            })
+            .Select(group => new
+            {
+                key = group.Key.ArchiveBatchId,
+                label = group.Key.Name,
+                itemCount = group.Count(),
+                totalAmount = group.Sum(x => x.Amount ?? 0m)
+            })
+            .OrderBy(x => x.label)
+            .ToListAsync();
+        return Results.Ok(groups);
+    }
     if (string.Equals(groupBy, "category", StringComparison.OrdinalIgnoreCase))
     {
         var groups = await query.GroupBy(x => x.Category)
@@ -1214,6 +1332,8 @@ static IQueryable<ClaimListRow> ProjectClaimList(IQueryable<ReimbursementClaim> 
     x.CurrentVersion.MealAllowance != null ? x.CurrentVersion.MealAllowance.Days : null,
     x.CurrentVersion.MealAllowance != null ? x.CurrentVersion.MealAllowance.TotalAmount : null,
     x.CurrentVersion.MealAllowance != null ? x.CurrentVersion.MealAllowance.ConcurrencyToken : null,
+    x.ArchiveBatchId,
+    x.ArchiveBatch != null ? x.ArchiveBatch.Name : null,
     x.ConcurrencyToken,
     x.CreatedAt,
     x.UpdatedAt));
@@ -1243,6 +1363,7 @@ static object ToClaimResponse(ReimbursementClaim claim) => new
     claim.Type,
     claim.Status,
     claim.PayoutStatus,
+    archiveBatch = claim.ArchiveBatch is null ? null : new { claim.ArchiveBatch.Id, claim.ArchiveBatch.Name, claim.ArchiveBatch.SubmittedFrom, claim.ArchiveBatch.SubmittedTo, claim.ArchiveBatch.CreatedAt },
     claim.ConcurrencyToken,
     claim.CurrentVersionId,
     currentVersion = claim.CurrentVersion is null ? null : ToVersionResponse(claim.CurrentVersion),
@@ -1371,6 +1492,8 @@ public sealed record ClaimListRow(
     int? MealAllowanceDays,
     decimal? MealAllowanceTotalAmount,
     Guid? MealAllowanceConcurrencyToken,
+    Guid? ArchiveBatchId,
+    string? ArchiveBatchName,
     Guid ConcurrencyToken,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
@@ -1393,6 +1516,8 @@ public sealed record MealAllowanceListRow(
     decimal? TotalAmount,
     MealAllowanceStatus Status,
     PayoutStatus PayoutStatus,
+    Guid? ArchiveBatchId,
+    string? ArchiveBatchName,
     DateTimeOffset UpdatedAt);
 
 public sealed record ExpenseItemDashboardRow(
@@ -1413,6 +1538,8 @@ public sealed record ExpenseItemDashboardRow(
     string? Merchant,
     string? Note,
     ClaimStatus ClaimStatus,
+    Guid? ArchiveBatchId,
+    string? ArchiveBatchName,
     DateTimeOffset UpdatedAt);
 
 public sealed record WeeklyReportRow(

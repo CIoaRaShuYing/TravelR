@@ -239,11 +239,11 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 .work-tabs { margin-top: 18px; }
 .work-tabs .el-tabs__header { margin-bottom: 16px; }
 .work-tabs .el-tabs__content { display: none; }
-.admin-claim-filters { display: grid; grid-template-columns: repeat(2, minmax(170px, 220px)) repeat(2, minmax(150px, 190px)) minmax(260px, 1fr); gap: 10px; align-items: center; margin-bottom: 14px; }
+.admin-claim-filters { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: 10px; align-items: center; margin-bottom: 14px; }
 .admin-claim-filters > .el-select, .admin-claim-filters > .el-date-editor { width: 100%; }
-.meal-allowance-filters { display: grid; grid-template-columns: minmax(180px, 240px) minmax(180px, 240px) minmax(280px, 1fr); gap: 10px; align-items: center; margin: 20px 0 14px; }
+.meal-allowance-filters { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; align-items: center; margin: 20px 0 14px; }
 .meal-allowance-filters > .el-select, .meal-allowance-filters > .el-date-editor { width: 100%; }
-.expense-dashboard-filters { display: grid; grid-template-columns: repeat(3, minmax(160px, 210px)) minmax(280px, 1fr); gap: 10px; align-items: center; margin: 20px 0 14px; }
+.expense-dashboard-filters { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: 10px; align-items: center; margin: 20px 0 14px; }
 .expense-dashboard-filters > .el-select, .expense-dashboard-filters > .el-date-editor { width: 100%; }
 .dashboard-summary { display: grid; grid-template-columns: minmax(130px, .65fr) minmax(190px, 1fr) minmax(150px, .8fr) minmax(250px, auto); min-height: 78px; margin-bottom: 12px; color: #f4f8f6; border-radius: 6px; background: var(--spruce); overflow: hidden; }
 .dashboard-summary > div { display: grid; align-content: center; gap: 5px; padding: 15px 20px; border-right: 1px solid #355a52; }
@@ -285,6 +285,25 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 /* Dialogs and management tools */
 .dialog-subject { display: grid; gap: 3px; margin-bottom: 20px; padding: 12px 14px; border-left: 3px solid var(--amber); background: #f5f7f5; }
 .dialog-subject span { color: var(--muted); font-size: 13px; }
+.claim-archive-notice { margin: 18px 0 0; }
+.claim-archive-notice p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+.archive-workbench { display: grid; grid-template-columns: minmax(280px, .75fr) minmax(440px, 1.25fr); gap: 20px; }
+.archive-create-panel, .archive-batch-panel { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.archive-create-panel { border-top: 3px solid var(--amber); background: #fbfcfb; }
+.archive-panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
+.archive-panel-heading > div { display: grid; gap: 3px; }
+.archive-panel-heading span, .archive-panel-heading small { color: var(--muted); font-size: 11px; }
+.archive-panel-heading strong { color: var(--spruce); font-size: 16px; }
+.archive-panel-heading small { max-width: 220px; line-height: 1.5; text-align: right; }
+.archive-create-panel .el-date-editor { width: 100%; }
+.archive-create-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.archive-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-top: 16px; overflow: hidden; border: 1px solid #b9d1c9; border-radius: 5px; background: #dce9e5; }
+.archive-preview > div { display: grid; gap: 4px; padding: 11px 12px; background: #f2f7f5; }
+.archive-preview span { color: var(--muted); font-size: 11px; }
+.archive-preview strong { color: var(--spruce); font-size: 15px; }
+.archive-preview.blocked { border-color: #e6b5ae; background: #f1d0cb; }
+.archive-preview ul { grid-column: 1 / -1; margin: 0; padding: 11px 28px; color: #a13f32; background: #fff4f2; font-size: 12px; }
+.archive-batch-mobile-list { display: none; }
 .decision-note { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
 .settings-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 22px; margin-top: 24px; }
 .settings-main { padding: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
@@ -330,6 +349,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
   .claim-summary-band { grid-template-columns: 1fr 1fr; }
   .claim-summary-band > div:nth-child(2), .claim-summary-band > div:nth-child(4) { border-right: 0; }
   .claim-summary-band .summary-mode { grid-column: 1 / -1; border-top: 1px solid #355a52; }
+  .archive-workbench { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 680px) {
@@ -395,6 +415,19 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
   .dashboard-summary .summary-mode .el-radio-button { flex: 1; }
   .dashboard-summary .summary-mode .el-radio-button__inner { width: 100%; padding-inline: 10px; }
   .claim-summary-band > div { padding: 14px; }
+  .archive-create-panel, .archive-batch-panel { padding: 14px; }
+  .archive-panel-heading { flex-direction: column; }
+  .archive-panel-heading small { max-width: none; text-align: left; }
+  .archive-batch-table { display: none; }
+  .archive-batch-mobile-list { display: grid; gap: 10px; }
+  .archive-batch-mobile-list article { display: grid; gap: 12px; padding: 13px; border: 1px solid var(--line); border-radius: 5px; background: #fbfcfb; }
+  .archive-batch-mobile-list article > div { display: grid; gap: 4px; }
+  .archive-batch-mobile-list article > div span, .archive-batch-mobile-list > p { color: var(--muted); font-size: 12px; }
+  .archive-batch-mobile-list dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+  .archive-batch-mobile-list dl div { display: grid; gap: 3px; }
+  .archive-batch-mobile-list dt { color: var(--muted); font-size: 10px; }
+  .archive-batch-mobile-list dd { margin: 0; color: var(--spruce); font-size: 12px; font-weight: 700; }
+  .archive-batch-mobile-list footer { display: flex; justify-content: flex-end; gap: 6px; }
   .mobile-record__actions { flex-wrap: wrap; }
 }
 

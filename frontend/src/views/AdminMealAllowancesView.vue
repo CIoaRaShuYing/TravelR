@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, View } from '@element-plus/icons-vue'
-import { api, type ApplicantOption, type DashboardGroupRow, type MealAllowanceListRow, type MealAllowanceStatus, type PayoutStatus, type Project } from '../api'
+import { api, type ApplicantOption, type ArchiveState, type ClaimArchiveBatchSummary, type DashboardGroupRow, type MealAllowanceListRow, type MealAllowanceStatus, type PayoutStatus, type Project } from '../api'
 import ClaimDetailDrawer from '../components/ClaimDetailDrawer.vue'
 
 const loading = ref(false)
@@ -11,11 +11,12 @@ const rows = ref<MealAllowanceListRow[]>([])
 const projects = ref<Project[]>([])
 const applicants = ref<ApplicantOption[]>([])
 const groups = ref<DashboardGroupRow[]>([])
-const groupBy = ref<'project' | 'applicant'>('project')
+const archiveBatches = ref<ClaimArchiveBatchSummary[]>([])
+const groupBy = ref<'project' | 'applicant' | 'archiveBatch'>('project')
 const total = ref(0)
 const summary = reactive({ mealAllowanceCount: 0, determinedAmount: 0, pendingAmountCount: 0 })
-const filters = reactive<{ projectId: string; applicantId: string; dates: string[]; page: number; pageSize: number }>({
-  projectId: '', applicantId: '', dates: [], page: 1, pageSize: 20,
+const filters = reactive<{ projectId: string; applicantId: string; archiveState: ArchiveState; archiveBatchId: string; dates: string[]; page: number; pageSize: number }>({
+  projectId: '', applicantId: '', archiveState: 'all', archiveBatchId: '', dates: [], page: 1, pageSize: 20,
 })
 const detailOpen = ref(false)
 const detailClaimId = ref<string | null>(null)
@@ -44,17 +45,21 @@ function appliedFilters() {
     applicantId: filters.applicantId || undefined,
     tripFrom: filters.dates[0] || undefined,
     tripTo: filters.dates[1] || undefined,
+    archiveState: filters.archiveState,
+    archiveBatchId: filters.archiveBatchId || undefined,
   }
 }
 
 async function loadOptions() {
   try {
-    const [projectResult, applicantResult] = await Promise.all([
+    const [projectResult, applicantResult, batchResult] = await Promise.all([
       api.listProjects({ page: 1, pageSize: 100 }),
       api.listApplicants({ page: 1, pageSize: 100 }),
+      api.listClaimArchiveBatches(),
     ])
     projects.value = projectResult.items
     applicants.value = applicantResult.items
+    archiveBatches.value = batchResult
   } catch (error) {
     ElMessage.error(api.message(error, '加载筛选项失败。'))
   }
@@ -96,9 +101,21 @@ async function load() {
 
 function applyFilters() { filters.page = 1; load() }
 function selectGroup(group: DashboardGroupRow) {
-  if (groupBy.value === 'project') filters.projectId = filters.projectId === group.key ? '' : group.key
-  else filters.applicantId = filters.applicantId === group.key ? '' : group.key
+  if (groupBy.value === 'project') filters.projectId = filters.projectId === group.key ? '' : group.key ?? ''
+  else if (groupBy.value === 'applicant') filters.applicantId = filters.applicantId === group.key ? '' : group.key ?? ''
+  else if (group.key) {
+    filters.archiveBatchId = filters.archiveBatchId === group.key ? '' : group.key
+    filters.archiveState = 'all'
+  } else {
+    filters.archiveBatchId = ''
+    filters.archiveState = filters.archiveState === 'unarchived' ? 'all' : 'unarchived'
+  }
   applyFilters()
+}
+function groupActive(group: DashboardGroupRow) {
+  if (groupBy.value === 'project') return filters.projectId === group.key
+  if (groupBy.value === 'applicant') return filters.applicantId === group.key
+  return group.key ? filters.archiveBatchId === group.key : filters.archiveState === 'unarchived' && !filters.archiveBatchId
 }
 function openDetail(row: MealAllowanceListRow) { detailClaimId.value = row.claimId; detailOpen.value = true }
 
@@ -116,6 +133,8 @@ onMounted(async () => { await loadOptions(); await load() })
     <div class="meal-allowance-filters">
       <el-select v-model="filters.projectId" clearable filterable placeholder="全部项目" @change="applyFilters"><el-option v-for="project in projects" :key="project.id" :label="`${project.code} · ${project.name}`" :value="project.id" /></el-select>
       <el-select v-model="filters.applicantId" clearable filterable remote reserve-keyword :remote-method="loadApplicants" :loading="applicantLoading" placeholder="全部申请人" @change="applyFilters"><el-option v-for="applicant in applicants" :key="applicant.id" :label="`${applicant.displayName} · ${applicant.phoneNumber}`" :value="applicant.id" /></el-select>
+      <el-select v-model="filters.archiveState" placeholder="全部归档状态" @change="filters.archiveBatchId = ''; applyFilters()"><el-option label="全部归档状态" value="all" /><el-option label="已归档" value="archived" /><el-option label="未归档" value="unarchived" /></el-select>
+      <el-select v-model="filters.archiveBatchId" clearable filterable placeholder="全部归档批次" @change="filters.archiveState = 'all'; applyFilters()"><el-option v-for="batch in archiveBatches" :key="batch.id" :label="batch.name" :value="batch.id" /></el-select>
       <el-date-picker v-model="filters.dates" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="行程开始" end-placeholder="行程结束" @change="applyFilters" />
     </div>
 
@@ -123,11 +142,11 @@ onMounted(async () => { await loadOptions(); await load() })
       <div><span>餐补笔数</span><strong>{{ summary.mealAllowanceCount }}</strong></div>
       <div class="dashboard-summary__amount"><span>已核定金额</span><strong>{{ money(summary.determinedAmount) }}</strong></div>
       <div><span>金额待核定</span><strong>{{ summary.pendingAmountCount }} 笔</strong></div>
-      <div class="summary-mode"><span>划分方式</span><el-radio-group v-model="groupBy" size="small"><el-radio-button value="project">按项目</el-radio-button><el-radio-button value="applicant">按人员</el-radio-button></el-radio-group></div>
+      <div class="summary-mode"><span>划分方式</span><el-radio-group v-model="groupBy" size="small"><el-radio-button value="project">按项目</el-radio-button><el-radio-button value="applicant">按人员</el-radio-button><el-radio-button value="archiveBatch">按归档</el-radio-button></el-radio-group></div>
     </div>
 
     <div class="group-ledger" aria-label="餐补分组汇总">
-      <button v-for="group in groups" :key="group.key" type="button" :class="{ active: groupBy === 'project' ? filters.projectId === group.key : filters.applicantId === group.key }" @click="selectGroup(group)">
+      <button v-for="group in groups" :key="group.key ?? 'unarchived'" type="button" :class="{ active: groupActive(group) }" @click="selectGroup(group)">
         <span>{{ group.label }}</span><strong>{{ group.itemCount }} 笔</strong><em>已核定 {{ money(group.totalAmount) }}</em>
       </button>
       <p v-if="!loading && groups.length === 0">当前条件下没有可汇总的餐补。</p>
@@ -144,6 +163,7 @@ onMounted(async () => { await loadOptions(); await load() })
         <el-table-column label="餐补总额" width="125" align="right"><template #default="scope"><strong v-if="scope.row.totalAmount != null">{{ money(scope.row.totalAmount) }}</strong><span v-else class="amount-pending">金额待核定</span></template></el-table-column>
         <el-table-column label="餐补状态" width="125"><template #default="scope"><el-tag :type="mealStatusType(scope.row.status)" effect="plain">{{ mealStatusLabel(scope.row.status) }}</el-tag></template></el-table-column>
         <el-table-column label="发放状态" width="105"><template #default="scope"><el-tag :type="payoutStatusType(scope.row.payoutStatus)" effect="plain">{{ payoutStatusLabel(scope.row.payoutStatus) }}</el-tag></template></el-table-column>
+        <el-table-column label="归档" min-width="150"><template #default="scope"><el-tag v-if="scope.row.archiveBatchId" type="info" effect="plain">{{ scope.row.archiveBatchName }}</el-tag><span v-else class="amount-pending">未归档</span></template></el-table-column>
         <el-table-column label="更新" width="120"><template #default="scope">{{ dateTime(scope.row.updatedAt) }}</template></el-table-column>
         <el-table-column label="操作" width="72" fixed="right"><template #default="scope"><el-tooltip content="查看报销详情"><el-button text circle :icon="View" aria-label="查看报销详情" @click="openDetail(scope.row)" /></el-tooltip></template></el-table-column>
       </el-table>
@@ -153,7 +173,7 @@ onMounted(async () => { await loadOptions(); await load() })
       <article v-for="item in rows" :key="item.id" class="mobile-record meal-allowance-mobile">
         <div class="mobile-record__head"><div><strong>{{ item.applicantName }} · {{ item.projectName }}</strong><span>{{ item.projectCode }} · {{ item.claimNumber }} · v{{ item.versionNumber }}</span></div><strong>{{ item.totalAmount == null ? '待核定' : money(item.totalAmount) }}</strong></div>
         <dl><div><dt>行程</dt><dd>{{ date(item.departureDate) }} — {{ date(item.returnDate) }}</dd></div><div><dt>餐补</dt><dd>{{ item.days }} 天 · 每日 {{ item.dailyAmount == null ? '待核定' : money(item.dailyAmount) }}</dd></div><div><dt>更新</dt><dd>{{ dateTime(item.updatedAt) }}</dd></div></dl>
-        <div class="claim-mobile-status"><el-tag :type="mealStatusType(item.status)" effect="plain">{{ mealStatusLabels[item.status] }}</el-tag><el-tag :type="payoutStatusType(item.payoutStatus)" effect="plain">{{ payoutLabels[item.payoutStatus] }}</el-tag></div>
+        <div class="claim-mobile-status"><el-tag :type="mealStatusType(item.status)" effect="plain">{{ mealStatusLabels[item.status] }}</el-tag><el-tag :type="payoutStatusType(item.payoutStatus)" effect="plain">{{ payoutLabels[item.payoutStatus] }}</el-tag><el-tag v-if="item.archiveBatchId" type="info" effect="plain">{{ item.archiveBatchName }}</el-tag></div>
         <div class="mobile-record__actions"><el-button :icon="View" @click="openDetail(item)">查看报销详情</el-button></div>
       </article>
       <el-empty v-if="!loading && rows.length === 0" description="当前条件下没有餐补" />

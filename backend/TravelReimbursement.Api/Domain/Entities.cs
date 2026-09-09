@@ -62,6 +62,22 @@ public sealed class Project
     public List<ClaimVersion> ClaimVersions { get; set; } = [];
 }
 
+public sealed class ClaimArchiveBatch
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = string.Empty;
+    public string NormalizedName { get; set; } = string.Empty;
+    public DateOnly SubmittedFrom { get; set; }
+    public DateOnly SubmittedTo { get; set; }
+    public Guid CreatedById { get; set; }
+    public AppUser CreatedBy { get; set; } = null!;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    [ConcurrencyCheck]
+    public Guid ConcurrencyToken { get; set; } = Guid.NewGuid();
+    public List<ReimbursementClaim> Claims { get; set; } = [];
+}
+
 public sealed class ReimbursementClaim
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -73,6 +89,8 @@ public sealed class ReimbursementClaim
     public ClaimVersion? CurrentVersion { get; set; }
     public ClaimStatus Status { get; set; } = ClaimStatus.Draft;
     public PayoutStatus PayoutStatus { get; set; } = PayoutStatus.NotApplicable;
+    public Guid? ArchiveBatchId { get; set; }
+    public ClaimArchiveBatch? ArchiveBatch { get; set; }
     [ConcurrencyCheck]
     public Guid ConcurrencyToken { get; set; } = Guid.NewGuid();
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

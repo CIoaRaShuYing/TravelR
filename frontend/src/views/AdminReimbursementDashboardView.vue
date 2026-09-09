@@ -5,6 +5,8 @@ import { Refresh, View } from '@element-plus/icons-vue'
 import {
   api,
   type ApplicantOption,
+  type ArchiveState,
+  type ClaimArchiveBatchSummary,
   type ClaimStatus,
   type DashboardGroupRow,
   type ExpenseCategory,
@@ -13,7 +15,7 @@ import {
 } from '../api'
 import ClaimDetailDrawer from '../components/ClaimDetailDrawer.vue'
 
-type GroupBy = 'project' | 'applicant' | 'category'
+type GroupBy = 'project' | 'applicant' | 'category' | 'archiveBatch'
 
 const loading = ref(false)
 const applicantLoading = ref(false)
@@ -21,11 +23,12 @@ const rows = ref<ExpenseItemDashboardRow[]>([])
 const projects = ref<Project[]>([])
 const applicants = ref<ApplicantOption[]>([])
 const groups = ref<DashboardGroupRow[]>([])
+const archiveBatches = ref<ClaimArchiveBatchSummary[]>([])
 const groupBy = ref<GroupBy>('project')
 const total = ref(0)
 const summary = reactive({ expenseItemCount: 0, totalAmount: 0, pendingAmountCount: 0 })
-const filters = reactive<{ category: '' | ExpenseCategory; projectId: string; applicantId: string; dates: string[]; page: number; pageSize: number }>({
-  category: '', projectId: '', applicantId: '', dates: [], page: 1, pageSize: 20,
+const filters = reactive<{ category: '' | ExpenseCategory; projectId: string; applicantId: string; archiveState: ArchiveState; archiveBatchId: string; dates: string[]; page: number; pageSize: number }>({
+  category: '', projectId: '', applicantId: '', archiveState: 'all', archiveBatchId: '', dates: [], page: 1, pageSize: 20,
 })
 const detailOpen = ref(false)
 const detailClaimId = ref<string | null>(null)
@@ -52,6 +55,7 @@ function groupLabel(group: DashboardGroupRow) { return groupBy.value === 'catego
 function groupActive(group: DashboardGroupRow) {
   if (groupBy.value === 'project') return filters.projectId === group.key
   if (groupBy.value === 'applicant') return filters.applicantId === group.key
+  if (groupBy.value === 'archiveBatch') return group.key ? filters.archiveBatchId === group.key : filters.archiveState === 'unarchived' && !filters.archiveBatchId
   return filters.category === group.key
 }
 
@@ -62,17 +66,21 @@ function appliedFilters() {
     applicantId: filters.applicantId || undefined,
     expenseFrom: filters.dates[0] || undefined,
     expenseTo: filters.dates[1] || undefined,
+    archiveState: filters.archiveState,
+    archiveBatchId: filters.archiveBatchId || undefined,
   }
 }
 
 async function loadOptions() {
   try {
-    const [projectResult, applicantResult] = await Promise.all([
+    const [projectResult, applicantResult, batchResult] = await Promise.all([
       api.listProjects({ page: 1, pageSize: 100 }),
       api.listApplicants({ page: 1, pageSize: 100 }),
+      api.listClaimArchiveBatches(),
     ])
     projects.value = projectResult.items
     applicants.value = applicantResult.items
+    archiveBatches.value = batchResult
   } catch (error) {
     ElMessage.error(api.message(error, '加载筛选项失败。'))
   }
@@ -114,9 +122,16 @@ async function load() {
 
 function applyFilters() { filters.page = 1; load() }
 function selectGroup(group: DashboardGroupRow) {
-  if (groupBy.value === 'project') filters.projectId = filters.projectId === group.key ? '' : group.key
-  else if (groupBy.value === 'applicant') filters.applicantId = filters.applicantId === group.key ? '' : group.key
-  else filters.category = filters.category === group.key ? '' : group.key as ExpenseCategory
+  if (groupBy.value === 'project') filters.projectId = filters.projectId === group.key ? '' : group.key ?? ''
+  else if (groupBy.value === 'applicant') filters.applicantId = filters.applicantId === group.key ? '' : group.key ?? ''
+  else if (groupBy.value === 'category') filters.category = filters.category === group.key ? '' : group.key as ExpenseCategory
+  else if (group.key) {
+    filters.archiveBatchId = filters.archiveBatchId === group.key ? '' : group.key
+    filters.archiveState = 'all'
+  } else {
+    filters.archiveBatchId = ''
+    filters.archiveState = filters.archiveState === 'unarchived' ? 'all' : 'unarchived'
+  }
   applyFilters()
 }
 function openDetail(row: ExpenseItemDashboardRow) { detailClaimId.value = row.claimId; detailOpen.value = true }
@@ -136,6 +151,8 @@ onMounted(async () => { await loadOptions(); await load() })
       <el-select v-model="filters.category" clearable placeholder="全部费用类别" @change="applyFilters"><el-option v-for="category in categoryOptions" :key="category" :label="categoryLabels[category]" :value="category" /></el-select>
       <el-select v-model="filters.projectId" clearable filterable placeholder="全部项目" @change="applyFilters"><el-option v-for="project in projects" :key="project.id" :label="`${project.code} · ${project.name}`" :value="project.id" /></el-select>
       <el-select v-model="filters.applicantId" clearable filterable remote reserve-keyword :remote-method="loadApplicants" :loading="applicantLoading" placeholder="全部申请人" @change="applyFilters"><el-option v-for="applicant in applicants" :key="applicant.id" :label="`${applicant.displayName} · ${applicant.phoneNumber}`" :value="applicant.id" /></el-select>
+      <el-select v-model="filters.archiveState" placeholder="全部归档状态" @change="filters.archiveBatchId = ''; applyFilters()"><el-option label="全部归档状态" value="all" /><el-option label="已归档" value="archived" /><el-option label="未归档" value="unarchived" /></el-select>
+      <el-select v-model="filters.archiveBatchId" clearable filterable placeholder="全部归档批次" @change="filters.archiveState = 'all'; applyFilters()"><el-option v-for="batch in archiveBatches" :key="batch.id" :label="batch.name" :value="batch.id" /></el-select>
       <el-date-picker v-model="filters.dates" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="费用开始" end-placeholder="费用结束" @change="applyFilters" />
     </div>
 
@@ -143,11 +160,11 @@ onMounted(async () => { await loadOptions(); await load() })
       <div><span>费用明细</span><strong>{{ summary.expenseItemCount }} 条</strong></div>
       <div class="dashboard-summary__amount"><span>已填写金额</span><strong>{{ money(summary.totalAmount) }}</strong></div>
       <div><span>金额待填写</span><strong>{{ summary.pendingAmountCount }} 条</strong></div>
-      <div class="summary-mode"><span>划分方式</span><el-radio-group v-model="groupBy" size="small"><el-radio-button value="project">按项目</el-radio-button><el-radio-button value="applicant">按人员</el-radio-button><el-radio-button value="category">按类别</el-radio-button></el-radio-group></div>
+      <div class="summary-mode"><span>划分方式</span><el-radio-group v-model="groupBy" size="small"><el-radio-button value="project">按项目</el-radio-button><el-radio-button value="applicant">按人员</el-radio-button><el-radio-button value="category">按类别</el-radio-button><el-radio-button value="archiveBatch">按归档</el-radio-button></el-radio-group></div>
     </div>
 
     <div class="group-ledger" aria-label="费用明细分组汇总">
-      <button v-for="group in groups" :key="group.key" type="button" :class="{ active: groupActive(group) }" @click="selectGroup(group)">
+      <button v-for="group in groups" :key="group.key ?? 'unarchived'" type="button" :class="{ active: groupActive(group) }" @click="selectGroup(group)">
         <span>{{ groupLabel(group) }}</span><strong>{{ group.itemCount }} 条</strong><em>金额 {{ money(group.totalAmount) }}</em>
       </button>
       <p v-if="!loading && groups.length === 0">当前条件下没有可汇总的费用明细。</p>
@@ -164,6 +181,7 @@ onMounted(async () => { await loadOptions(); await load() })
         <el-table-column prop="merchant" label="商户 / 承运方" min-width="150" show-overflow-tooltip><template #default="scope">{{ scope.row.merchant || '未填写' }}</template></el-table-column>
         <el-table-column prop="note" label="备注" min-width="160" show-overflow-tooltip><template #default="scope">{{ scope.row.note || '无' }}</template></el-table-column>
         <el-table-column label="报销状态" width="105"><template #default="scope"><el-tag :type="claimStatusType(scope.row.claimStatus)" effect="plain">{{ claimStatusLabel(scope.row.claimStatus) }}</el-tag></template></el-table-column>
+        <el-table-column label="归档" min-width="150"><template #default="scope"><el-tag v-if="scope.row.archiveBatchId" type="info" effect="plain">{{ scope.row.archiveBatchName }}</el-tag><span v-else class="amount-pending">未归档</span></template></el-table-column>
         <el-table-column label="更新" width="120"><template #default="scope">{{ dateTime(scope.row.updatedAt) }}</template></el-table-column>
         <el-table-column label="操作" width="72" fixed="right"><template #default="scope"><el-tooltip content="查看报销详情"><el-button text circle :icon="View" aria-label="查看报销详情" @click="openDetail(scope.row)" /></el-tooltip></template></el-table-column>
       </el-table>
@@ -174,7 +192,7 @@ onMounted(async () => { await loadOptions(); await load() })
         <div class="mobile-record__head"><div><strong>{{ categoryLabel(item.category) }} · {{ item.applicantName }}</strong><span>{{ item.projectCode }} · {{ item.claimNumber }} · v{{ item.versionNumber }}</span></div><strong>{{ item.amount == null ? '待填写' : money(item.amount) }}</strong></div>
         <p>{{ item.merchant || '商户或承运方未填写' }}{{ item.note ? ` · ${item.note}` : '' }}</p>
         <dl><div><dt>项目</dt><dd>{{ item.projectName }}</dd></div><div><dt>日期</dt><dd>{{ date(item.expenseDate) }}</dd></div><div><dt>更新</dt><dd>{{ dateTime(item.updatedAt) }}</dd></div></dl>
-        <div class="claim-mobile-status"><el-tag effect="plain">{{ categoryLabel(item.category) }}</el-tag><el-tag :type="claimStatusType(item.claimStatus)" effect="plain">{{ claimStatusLabel(item.claimStatus) }}</el-tag></div>
+        <div class="claim-mobile-status"><el-tag effect="plain">{{ categoryLabel(item.category) }}</el-tag><el-tag :type="claimStatusType(item.claimStatus)" effect="plain">{{ claimStatusLabel(item.claimStatus) }}</el-tag><el-tag v-if="item.archiveBatchId" type="info" effect="plain">{{ item.archiveBatchName }}</el-tag></div>
         <div class="mobile-record__actions"><el-button :icon="View" @click="openDetail(item)">查看报销详情</el-button></div>
       </article>
       <el-empty v-if="!loading && rows.length === 0" description="当前条件下没有费用明细" />

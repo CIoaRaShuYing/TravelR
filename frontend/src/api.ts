@@ -3,6 +3,7 @@ export type RegistrationRequestStatus = 'Pending' | 'Approved' | 'Rejected'
 export type ClaimType = 'Travel' | 'General'
 export type ClaimStatus = 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Cancelled'
 export type PayoutStatus = 'NotApplicable' | 'Pending' | 'Paid'
+export type ArchiveState = 'all' | 'archived' | 'unarchived'
 export type MealAllowanceStatus = 'Draft' | 'PendingTravelReview' | 'PendingReview' | 'Approved' | 'Rejected' | 'Cancelled'
 export type ExpenseCategory = 'DepartureTransport' | 'ReturnTransport' | 'Lodging' | 'OfficeSupplies' | 'Meal' | 'Other' | 'Unspecified'
 
@@ -77,6 +78,8 @@ export type ClaimListRow = {
   mealAllowanceDays?: number | null
   mealAllowanceTotalAmount?: number | null
   mealAllowanceConcurrencyToken?: string | null
+  archiveBatchId?: string | null
+  archiveBatchName?: string | null
   concurrencyToken: string
   createdAt: string
   updatedAt: string
@@ -100,6 +103,8 @@ export type MealAllowanceListRow = {
   totalAmount?: number | null
   status: MealAllowanceStatus
   payoutStatus: PayoutStatus
+  archiveBatchId?: string | null
+  archiveBatchName?: string | null
   updatedAt: string
 }
 
@@ -121,10 +126,40 @@ export type ExpenseItemDashboardRow = {
   merchant?: string | null
   note?: string | null
   claimStatus: ClaimStatus
+  archiveBatchId?: string | null
+  archiveBatchName?: string | null
   updatedAt: string
 }
 
-export type DashboardGroupRow = { key: string; label: string; itemCount: number; totalAmount: number }
+export type DashboardGroupRow = { key: string | null; label: string; itemCount: number; totalAmount: number }
+
+export type ClaimArchiveBatchSummary = {
+  id: string
+  name: string
+  submittedFrom: string
+  submittedTo: string
+  claimCount: number
+  reimbursementAmount: number
+  mealAllowanceCount: number
+  mealAllowanceAmount: number
+  createdById: string
+  createdByName: string
+  createdAt: string
+  updatedAt: string
+  concurrencyToken: string
+}
+
+export type ClaimArchivePreview = {
+  submittedFrom: string
+  submittedTo: string
+  matchingClaimCount: number
+  eligibleClaimCount: number
+  blockedClaimCount: number
+  reimbursementAmount: number
+  mealAllowanceCount: number
+  mealAllowanceAmount: number
+  blockedReasons: Array<{ reason: string; count: number }>
+}
 
 export type Attachment = {
   id: string
@@ -297,6 +332,7 @@ export type ClaimDetail = {
   reviewedAt?: string | null
   cancelledAt?: string | null
   paidAt?: string | null
+  archiveBatch?: { id: string; name: string; submittedFrom: string; submittedTo: string; createdAt: string } | null
   approvalRecords: Array<{
     claimVersionId: string
     versionNumber: number
@@ -468,12 +504,18 @@ export const api = {
   createProject: (body: { code: string; name: string; description?: string }) => request<Project>('/admin/projects', { method: 'POST', body: JSON.stringify(body) }),
   updateProject: (id: string, body: { name: string; description?: string; concurrencyToken: string }) => request<Project>(`/admin/projects/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   setProjectActive: (id: string, active: boolean) => request<{ id: string; isActive: boolean; concurrencyToken: string }>(`/admin/projects/${id}/${active ? 'enable' : 'disable'}`, { method: 'POST', body: '{}' }),
-  listAdminClaims: (filters: { projectId?: string; applicantId?: string; status?: ClaimStatus; payoutStatus?: PayoutStatus; workQueue?: 'approval' | 'payout'; createdFrom?: string; createdTo?: string; page?: number; pageSize?: number }) => request<PagedResult<ClaimListRow> & { summary: { claimCount: number; totalAmount: number; reimbursementAmount: number; mealAllowanceAmount: number } }>(`/admin/claims${queryString(filters)}`),
-  getClaimGroupSummary: (filters: { groupBy: 'project' | 'applicant'; projectId?: string; applicantId?: string; status?: ClaimStatus; payoutStatus?: PayoutStatus; workQueue?: 'approval' | 'payout'; createdFrom?: string; createdTo?: string }) => request<Array<{ key: string; label: string; claimCount: number; totalAmount: number }>>(`/admin/claims/group-summary${queryString(filters)}`),
-  listAdminMealAllowances: (filters: { projectId?: string; applicantId?: string; tripFrom?: string; tripTo?: string; page?: number; pageSize?: number }) => request<PagedResult<MealAllowanceListRow> & { summary: { mealAllowanceCount: number; determinedAmount: number; pendingAmountCount: number } }>(`/admin/meal-allowances${queryString(filters)}`),
-  getMealAllowanceGroupSummary: (filters: { groupBy: 'project' | 'applicant'; projectId?: string; applicantId?: string; tripFrom?: string; tripTo?: string }) => request<DashboardGroupRow[]>(`/admin/meal-allowances/group-summary${queryString(filters)}`),
-  listAdminExpenseItems: (filters: { category?: ExpenseCategory; projectId?: string; applicantId?: string; expenseFrom?: string; expenseTo?: string; page?: number; pageSize?: number }) => request<PagedResult<ExpenseItemDashboardRow> & { summary: { expenseItemCount: number; totalAmount: number; pendingAmountCount: number } }>(`/admin/expense-items${queryString(filters)}`),
-  getExpenseItemGroupSummary: (filters: { groupBy: 'project' | 'applicant' | 'category'; category?: ExpenseCategory; projectId?: string; applicantId?: string; expenseFrom?: string; expenseTo?: string }) => request<DashboardGroupRow[]>(`/admin/expense-items/group-summary${queryString(filters)}`),
+  listClaimArchiveBatches: () => request<ClaimArchiveBatchSummary[]>('/admin/claim-archive-batches'),
+  getClaimArchiveBatch: (id: string) => request<ClaimArchiveBatchSummary>(`/admin/claim-archive-batches/${id}`),
+  previewClaimArchive: (body: { submittedFrom: string; submittedTo: string }) => request<ClaimArchivePreview>('/admin/claim-archive-batches/preview', { method: 'POST', body: JSON.stringify(body) }),
+  createClaimArchiveBatch: (body: { name: string; submittedFrom: string; submittedTo: string }) => request<ClaimArchiveBatchSummary>('/admin/claim-archive-batches', { method: 'POST', body: JSON.stringify(body) }),
+  renameClaimArchiveBatch: (id: string, body: { name: string; concurrencyToken: string }) => request<ClaimArchiveBatchSummary>(`/admin/claim-archive-batches/${id}/name`, { method: 'PUT', body: JSON.stringify(body) }),
+  exportClaimArchiveBatch: (id: string) => download(`/admin/claim-archive-batches/${id}/export.zip`),
+  listAdminClaims: (filters: { projectId?: string; applicantId?: string; status?: ClaimStatus; payoutStatus?: PayoutStatus; workQueue?: 'approval' | 'payout'; createdFrom?: string; createdTo?: string; archiveState?: ArchiveState; archiveBatchId?: string; page?: number; pageSize?: number }) => request<PagedResult<ClaimListRow> & { summary: { claimCount: number; totalAmount: number; reimbursementAmount: number; mealAllowanceAmount: number } }>(`/admin/claims${queryString(filters)}`),
+  getClaimGroupSummary: (filters: { groupBy: 'project' | 'applicant' | 'archiveBatch'; projectId?: string; applicantId?: string; status?: ClaimStatus; payoutStatus?: PayoutStatus; workQueue?: 'approval' | 'payout'; createdFrom?: string; createdTo?: string; archiveState?: ArchiveState; archiveBatchId?: string }) => request<Array<{ key: string | null; label: string; claimCount: number; totalAmount: number }>>(`/admin/claims/group-summary${queryString(filters)}`),
+  listAdminMealAllowances: (filters: { projectId?: string; applicantId?: string; tripFrom?: string; tripTo?: string; archiveState?: ArchiveState; archiveBatchId?: string; page?: number; pageSize?: number }) => request<PagedResult<MealAllowanceListRow> & { summary: { mealAllowanceCount: number; determinedAmount: number; pendingAmountCount: number } }>(`/admin/meal-allowances${queryString(filters)}`),
+  getMealAllowanceGroupSummary: (filters: { groupBy: 'project' | 'applicant' | 'archiveBatch'; projectId?: string; applicantId?: string; tripFrom?: string; tripTo?: string; archiveState?: ArchiveState; archiveBatchId?: string }) => request<DashboardGroupRow[]>(`/admin/meal-allowances/group-summary${queryString(filters)}`),
+  listAdminExpenseItems: (filters: { category?: ExpenseCategory; projectId?: string; applicantId?: string; expenseFrom?: string; expenseTo?: string; archiveState?: ArchiveState; archiveBatchId?: string; page?: number; pageSize?: number }) => request<PagedResult<ExpenseItemDashboardRow> & { summary: { expenseItemCount: number; totalAmount: number; pendingAmountCount: number } }>(`/admin/expense-items${queryString(filters)}`),
+  getExpenseItemGroupSummary: (filters: { groupBy: 'project' | 'applicant' | 'category' | 'archiveBatch'; category?: ExpenseCategory; projectId?: string; applicantId?: string; expenseFrom?: string; expenseTo?: string; archiveState?: ArchiveState; archiveBatchId?: string }) => request<DashboardGroupRow[]>(`/admin/expense-items/group-summary${queryString(filters)}`),
   reviewClaim: (claimId: string, versionId: string, action: 'approve' | 'reject', body: { expectedCurrentVersionId: string; concurrencyToken: string; comment?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/versions/${versionId}/${action}`, { method: 'POST', body: JSON.stringify(body) }),
   confirmPayout: (claimId: string, body: { expectedCurrentVersionId: string; concurrencyToken: string; note?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/payout/confirm`, { method: 'POST', body: JSON.stringify(body) }),
   reviewMealAllowance: (claimId: string, action: 'approve' | 'reject', body: { expectedCurrentVersionId: string; claimConcurrencyToken: string; mealConcurrencyToken: string; dailyAmount?: number; comment?: string }) => request<ClaimDetail>(`/admin/claims/${claimId}/meal-allowance/${action}`, { method: 'POST', body: JSON.stringify(body) }),
@@ -493,6 +535,9 @@ export const api = {
     if (data.code === 'USER_INACTIVE_ROLE_CHANGE') return '停用用户不能设为管理员。'
     if (data.code === 'USER_SELF_ADMIN_REVOKE') return '不能取消当前登录账户的管理员角色。'
     if (data.code === 'SUPER_ADMIN_ROLE_REQUIRED') return '超级管理员账号不能取消管理员角色。'
+    if (data.code === 'CLAIM_ARCHIVED') return '该报销已归档，不能再修改、审批或发放。'
+    if (data.code === 'ARCHIVE_SCOPE_NOT_READY') return data.message || '所选范围存在不可归档报销。'
+    if (data.code === 'ARCHIVE_NAME_CONFLICT') return '归档名称已存在，请使用其他名称。'
     if (data.code === 'USER_SELF_PASSWORD_RESET') return '请使用账号安全页面修改自己的密码。'
     return data.message ?? (Object.values(data.errors ?? {}).flat().join('；') || fallback)
   },

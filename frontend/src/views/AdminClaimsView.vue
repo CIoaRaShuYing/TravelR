@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Check, Close, Coin, Download, Refresh, View } from '@element-plus/icons-vue'
-import { api, type ApplicantOption, type ClaimListRow, type ClaimStatus, type PaymentProfile, type PayoutStatus, type Project } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Check, Close, Coin, Download, Edit, FolderAdd, Refresh, View } from '@element-plus/icons-vue'
+import { api, type ApplicantOption, type ArchiveState, type ClaimArchiveBatchSummary, type ClaimArchivePreview, type ClaimListRow, type ClaimStatus, type PaymentProfile, type PayoutStatus, type Project } from '../api'
 import ClaimDetailDrawer from '../components/ClaimDetailDrawer.vue'
 
 type WorkView = 'approval' | 'payout' | 'all'
-type GroupBy = 'project' | 'applicant'
-type GroupRow = { key: string; label: string; claimCount: number; totalAmount: number }
+type GroupBy = 'project' | 'applicant' | 'archiveBatch'
+type GroupRow = { key: string | null; label: string; claimCount: number; totalAmount: number }
 
 const activeView = ref<WorkView>('approval')
 const loading = ref(false)
@@ -16,11 +16,12 @@ const rows = ref<ClaimListRow[]>([])
 const projects = ref<Project[]>([])
 const applicants = ref<ApplicantOption[]>([])
 const groups = ref<GroupRow[]>([])
+const archiveBatches = ref<ClaimArchiveBatchSummary[]>([])
 const groupBy = ref<GroupBy>('project')
 const total = ref(0)
 const summary = reactive({ claimCount: 0, totalAmount: 0, reimbursementAmount: 0, mealAllowanceAmount: 0 })
-const filters = reactive<{ projectId: string; applicantId: string; status: '' | ClaimStatus; payoutStatus: '' | PayoutStatus; dates: string[]; page: number; pageSize: number }>({
-  projectId: '', applicantId: '', status: '', payoutStatus: '', dates: [], page: 1, pageSize: 20,
+const filters = reactive<{ projectId: string; applicantId: string; status: '' | ClaimStatus; payoutStatus: '' | PayoutStatus; archiveState: ArchiveState; archiveBatchId: string; dates: string[]; page: number; pageSize: number }>({
+  projectId: '', applicantId: '', status: '', payoutStatus: '', archiveState: 'all', archiveBatchId: '', dates: [], page: 1, pageSize: 20,
 })
 const detailOpen = ref(false)
 const detailClaimId = ref<string | null>(null)
@@ -46,6 +47,12 @@ const exportOpen = ref(false)
 const exporting = ref(false)
 const exportProjectId = ref('')
 const exportDates = ref<string[]>([])
+const archiveOpen = ref(false)
+const archiveLoading = ref(false)
+const archiveName = ref('')
+const archiveDates = ref<string[]>([])
+const archivePreview = ref<ClaimArchivePreview | null>(null)
+const archivePreviewRange = ref('')
 
 const statusLabels: Record<ClaimStatus, string> = { Draft: '草稿', Submitted: '待审批', Approved: '已批准', Rejected: '已驳回', Cancelled: '已作废' }
 const payoutLabels: Record<PayoutStatus, string> = { NotApplicable: '无需发放', Pending: '待发放', Paid: '已发放' }
@@ -54,6 +61,10 @@ const claimStatuses: ClaimStatus[] = ['Draft', 'Submitted', 'Approved', 'Rejecte
 const payoutStatuses: PayoutStatus[] = ['NotApplicable', 'Pending', 'Paid']
 const mealStatusLabels: Record<string, string> = { Draft: '草稿', PendingTravelReview: '等待差旅审批', PendingReview: '待餐补审批', Approved: '已批准', Rejected: '已驳回', Cancelled: '已作废' }
 const mealTotalAmount = computed(() => Number(mealDailyAmount.value ?? 0) * Number(mealReviewTarget.value?.mealAllowanceDays ?? 0))
+const archiveCanCreate = computed(() => archivePreview.value != null
+  && archivePreview.value.eligibleClaimCount > 0
+  && archivePreview.value.blockedClaimCount === 0
+  && archivePreviewRange.value === archiveDates.value.join('|'))
 
 function money(value: number) { return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(value) }
 function currentVersionTotalAmount(row: ClaimListRow) { return row.totalAmount + (row.mealAllowanceTotalAmount ?? 0) }
@@ -71,17 +82,21 @@ function appliedFilters() {
     workQueue: activeView.value === 'all' ? undefined : activeView.value,
     createdFrom: filters.dates[0] || undefined,
     createdTo: filters.dates[1] || undefined,
+    archiveState: activeView.value === 'all' ? filters.archiveState : undefined,
+    archiveBatchId: activeView.value === 'all' ? filters.archiveBatchId || undefined : undefined,
   }
 }
 
 async function loadOptions() {
   try {
-    const [projectResult, applicantResult] = await Promise.all([
+    const [projectResult, applicantResult, batchResult] = await Promise.all([
       api.listProjects({ page: 1, pageSize: 100 }),
       api.listApplicants({ page: 1, pageSize: 100 }),
+      api.listClaimArchiveBatches(),
     ])
     projects.value = projectResult.items
     applicants.value = applicantResult.items
+    archiveBatches.value = batchResult
   } catch (error) {
     ElMessage.error(api.message(error, '加载筛选项失败。'))
   }
@@ -124,9 +139,21 @@ async function load() {
 
 function applyFilters() { filters.page = 1; load() }
 function selectGroup(group: GroupRow) {
-  if (groupBy.value === 'project') filters.projectId = filters.projectId === group.key ? '' : group.key
-  else filters.applicantId = filters.applicantId === group.key ? '' : group.key
+  if (groupBy.value === 'project') filters.projectId = filters.projectId === group.key ? '' : group.key ?? ''
+  else if (groupBy.value === 'applicant') filters.applicantId = filters.applicantId === group.key ? '' : group.key ?? ''
+  else if (group.key) {
+    filters.archiveBatchId = filters.archiveBatchId === group.key ? '' : group.key
+    filters.archiveState = 'all'
+  } else {
+    filters.archiveBatchId = ''
+    filters.archiveState = filters.archiveState === 'unarchived' ? 'all' : 'unarchived'
+  }
   applyFilters()
+}
+function groupActive(group: GroupRow) {
+  if (groupBy.value === 'project') return filters.projectId === group.key
+  if (groupBy.value === 'applicant') return filters.applicantId === group.key
+  return group.key ? filters.archiveBatchId === group.key : filters.archiveState === 'unarchived' && !filters.archiveBatchId
 }
 function openDetail(row: ClaimListRow) { detailClaimId.value = row.id; detailIncludesSuperseded.value = activeView.value !== 'approval'; detailOpen.value = true }
 function openReview(row: ClaimListRow, action: 'approve' | 'reject') { reviewTarget.value = row; reviewAction.value = action; reviewComment.value = ''; reviewOpen.value = true }
@@ -251,16 +278,81 @@ async function exportClaims() {
   finally { exporting.value = false }
 }
 
+function downloadResult(result: { blob: Blob; fileName: string }) {
+  const url = URL.createObjectURL(result.blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = result.fileName
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+async function openArchiveManager() {
+  archiveOpen.value = true
+  archiveLoading.value = true
+  try { archiveBatches.value = await api.listClaimArchiveBatches() }
+  catch (error) { ElMessage.error(api.message(error, '加载归档批次失败。')) }
+  finally { archiveLoading.value = false }
+}
+
+async function previewArchive() {
+  if (archiveDates.value.length !== 2) { ElMessage.warning('请选择完整的报销提交日期范围。'); return }
+  archiveLoading.value = true
+  try {
+    archivePreview.value = await api.previewClaimArchive({ submittedFrom: archiveDates.value[0], submittedTo: archiveDates.value[1] })
+    archivePreviewRange.value = archiveDates.value.join('|')
+  } catch (error) { ElMessage.error(api.message(error, '归档预览失败。')) }
+  finally { archiveLoading.value = false }
+}
+
+async function createArchiveBatch() {
+  if (!archiveName.value.trim()) { ElMessage.warning('请填写归档名称。'); return }
+  if (!archiveCanCreate.value) { ElMessage.warning('请先预览并解决全部不可归档项。'); return }
+  archiveLoading.value = true
+  try {
+    await api.createClaimArchiveBatch({ name: archiveName.value.trim(), submittedFrom: archiveDates.value[0], submittedTo: archiveDates.value[1] })
+    ElMessage.success('归档批次已创建，批次成员已冻结。')
+    archiveName.value = ''
+    archivePreview.value = null
+    archivePreviewRange.value = ''
+    archiveBatches.value = await api.listClaimArchiveBatches()
+    await load()
+  } catch (error) { ElMessage.error(api.message(error, '创建归档批次失败。')) }
+  finally { archiveLoading.value = false }
+}
+
+async function renameArchiveBatch(batch: ClaimArchiveBatchSummary) {
+  try {
+    const result = await ElMessageBox.prompt('成员和日期范围不会改变。', '修改归档名称', { inputValue: batch.name, inputPattern: /\S+/, inputErrorMessage: '归档名称不能为空。', confirmButtonText: '保存名称', cancelButtonText: '取消' })
+    await api.renameClaimArchiveBatch(batch.id, { name: result.value.trim(), concurrencyToken: batch.concurrencyToken })
+    archiveBatches.value = await api.listClaimArchiveBatches()
+    ElMessage.success('归档名称已更新。')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(api.message(error, '修改归档名称失败。'))
+  }
+}
+
+async function exportArchiveBatch(batch: ClaimArchiveBatchSummary) {
+  archiveLoading.value = true
+  try {
+    downloadResult(await api.exportClaimArchiveBatch(batch.id))
+    ElMessage.success(`已按“${batch.name}”的固定成员重新导出。`)
+  } catch (error) { ElMessage.error(api.message(error, '重新导出归档批次失败。')) }
+  finally { archiveLoading.value = false }
+}
+
 watch(activeView, () => { filters.page = 1; load() })
 watch(groupBy, () => load())
+watch(archiveDates, () => { archivePreview.value = null; archivePreviewRange.value = '' })
 onMounted(async () => { await loadOptions(); await load() })
 </script>
 
 <template>
   <section>
     <header class="page-header">
-      <div><p class="eyebrow">CLAIM CONTROL DESK</p><h1>报销管理</h1><p>依次审核差旅与餐补，分别确认发放，并按项目导出月度记录及凭证。</p></div>
-      <div class="page-actions"><el-button :icon="Download" @click="exportOpen = true">月度导出</el-button><el-tooltip content="刷新报销"><el-button circle :icon="Refresh" aria-label="刷新报销" @click="load" /></el-tooltip></div>
+      <div><p class="eyebrow">CLAIM CONTROL DESK</p><h1>报销管理</h1><p>依次审核与发放；完结记录可按提交月份冻结为可追溯归档批次。</p></div>
+      <div class="page-actions"><el-button :icon="FolderAdd" type="primary" plain @click="openArchiveManager">归档批次</el-button><el-button :icon="Download" @click="exportOpen = true">月度导出</el-button><el-tooltip content="刷新报销"><el-button circle :icon="Refresh" aria-label="刷新报销" @click="load" /></el-tooltip></div>
     </header>
 
     <el-tabs v-model="activeView" class="work-tabs">
@@ -274,6 +366,8 @@ onMounted(async () => { await loadOptions(); await load() })
       <el-select v-model="filters.applicantId" clearable filterable remote reserve-keyword :remote-method="loadApplicants" :loading="applicantLoading" placeholder="全部申请人" @change="applyFilters"><el-option v-for="applicant in applicants" :key="applicant.id" :label="`${applicant.displayName} · ${applicant.phoneNumber}`" :value="applicant.id" /></el-select>
       <el-select v-if="activeView === 'all'" v-model="filters.status" clearable placeholder="全部报销状态" @change="applyFilters"><el-option v-for="status in claimStatuses" :key="status" :label="claimStatusLabel(status)" :value="status" /></el-select>
       <el-select v-if="activeView === 'all'" v-model="filters.payoutStatus" clearable placeholder="全部发放状态" @change="applyFilters"><el-option v-for="status in payoutStatuses" :key="status" :label="payoutStatusLabel(status)" :value="status" /></el-select>
+      <el-select v-if="activeView === 'all'" v-model="filters.archiveState" placeholder="全部归档状态" @change="filters.archiveBatchId = ''; applyFilters()"><el-option label="全部归档状态" value="all" /><el-option label="已归档" value="archived" /><el-option label="未归档" value="unarchived" /></el-select>
+      <el-select v-if="activeView === 'all'" v-model="filters.archiveBatchId" clearable filterable placeholder="全部归档批次" @change="filters.archiveState = 'all'; applyFilters()"><el-option v-for="batch in archiveBatches" :key="batch.id" :label="batch.name" :value="batch.id" /></el-select>
       <el-date-picker v-model="filters.dates" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="创建开始" end-placeholder="创建结束" @change="applyFilters" />
     </div>
 
@@ -282,11 +376,11 @@ onMounted(async () => { await loadOptions(); await load() })
       <div class="summary-total"><span>当前版本总金额</span><strong>{{ money(summary.totalAmount) }}</strong></div>
       <div class="summary-breakdown"><span>当前版本报销金额</span><strong>{{ money(summary.reimbursementAmount) }}</strong></div>
       <div class="summary-breakdown"><span>当前版本餐补金额</span><strong>{{ money(summary.mealAllowanceAmount) }}</strong></div>
-      <div class="summary-mode"><span>划分方式</span><el-radio-group v-model="groupBy" size="small"><el-radio-button value="project">按项目</el-radio-button><el-radio-button value="applicant">按人员</el-radio-button></el-radio-group></div>
+      <div class="summary-mode"><span>划分方式</span><el-radio-group v-model="groupBy" size="small"><el-radio-button value="project">按项目</el-radio-button><el-radio-button value="applicant">按人员</el-radio-button><el-radio-button value="archiveBatch">按归档</el-radio-button></el-radio-group></div>
     </div>
 
     <div class="group-ledger" aria-label="报销分组汇总">
-      <button v-for="group in groups" :key="group.key" type="button" :class="{ active: groupBy === 'project' ? filters.projectId === group.key : filters.applicantId === group.key }" @click="selectGroup(group)">
+      <button v-for="group in groups" :key="group.key ?? 'unarchived'" type="button" :class="{ active: groupActive(group) }" @click="selectGroup(group)">
         <span>{{ group.label }}</span><strong>{{ group.claimCount }} 笔</strong><em>总金额 {{ money(group.totalAmount) }}</em>
       </button>
       <p v-if="!loading && groups.length === 0">当前条件下没有可汇总的报销。</p>
@@ -303,6 +397,7 @@ onMounted(async () => { await loadOptions(); await load() })
         <el-table-column label="报销状态" width="105"><template #default="scope"><el-tag :type="statusType(scope.row.status)" effect="plain">{{ claimStatusLabel(scope.row.status) }}</el-tag></template></el-table-column>
         <el-table-column label="报销发放" width="105"><template #default="scope"><el-tag :type="scope.row.payoutStatus === 'Paid' ? 'success' : scope.row.payoutStatus === 'Pending' ? 'warning' : 'info'" effect="plain">{{ payoutStatusLabel(scope.row.payoutStatus) }}</el-tag></template></el-table-column>
         <el-table-column label="餐补金额 / 状态" min-width="205"><template #default="scope"><div v-if="scope.row.mealAllowanceStatus" class="primary-cell"><strong>{{ money(scope.row.mealAllowanceTotalAmount ?? 0) }}</strong><span>{{ scope.row.mealAllowanceDays }} 天 · {{ mealStatusLabels[scope.row.mealAllowanceStatus] }} · {{ scope.row.mealAllowanceTotalAmount == null ? '金额待核定' : '金额已核定' }} · {{ payoutStatusLabel(scope.row.mealAllowancePayoutStatus ?? 'NotApplicable') }}</span></div><span v-else>{{ money(0) }}</span></template></el-table-column>
+        <el-table-column label="归档" min-width="150"><template #default="scope"><el-tag v-if="scope.row.archiveBatchId" type="info" effect="plain">{{ scope.row.archiveBatchName }}</el-tag><span v-else class="amount-pending">未归档</span></template></el-table-column>
         <el-table-column label="更新" width="120"><template #default="scope">{{ dateTime(scope.row.updatedAt) }}</template></el-table-column>
         <el-table-column label="操作" width="220" fixed="right"><template #default="scope"><el-tooltip content="查看详情"><el-button text circle :icon="View" aria-label="查看详情" @click="openDetail(scope.row)" /></el-tooltip><template v-if="scope.row.status === 'Submitted'"><el-tooltip content="批准报销"><el-button text circle type="success" :icon="Check" aria-label="批准报销" @click="openReview(scope.row, 'approve')" /></el-tooltip><el-tooltip content="驳回报销"><el-button text circle type="danger" :icon="Close" aria-label="驳回报销" @click="openReview(scope.row, 'reject')" /></el-tooltip></template><template v-if="scope.row.mealAllowanceStatus === 'PendingReview'"><el-tooltip content="批准餐补"><el-button text circle type="success" :icon="Check" aria-label="批准餐补" @click="openMealReview(scope.row, 'approve')" /></el-tooltip><el-tooltip content="驳回餐补"><el-button text circle type="danger" :icon="Close" aria-label="驳回餐补" @click="openMealReview(scope.row, 'reject')" /></el-tooltip></template><el-tooltip v-if="scope.row.status === 'Approved' && scope.row.payoutStatus === 'Pending'" content="确认报销发放"><el-button text circle type="warning" :icon="Coin" aria-label="确认报销发放" @click="openPayout(scope.row)" /></el-tooltip><el-tooltip v-if="scope.row.mealAllowanceStatus === 'Approved' && scope.row.mealAllowancePayoutStatus === 'Pending'" content="确认餐补发放"><el-button text circle type="primary" :icon="Coin" aria-label="确认餐补发放" @click="openMealPayout(scope.row)" /></el-tooltip></template></el-table-column>
       </el-table>
@@ -313,7 +408,7 @@ onMounted(async () => { await loadOptions(); await load() })
         <div class="mobile-record__head"><div><strong>{{ item.applicantName }} · {{ item.projectName }}</strong><span>{{ item.projectCode }} · {{ item.claimNumber }} · v{{ item.versionNumber }}</span></div><strong>{{ money(currentVersionTotalAmount(item)) }}</strong></div>
         <p>{{ item.description || '暂无报销说明' }}</p>
         <p class="mobile-record__meta">当前版本：报销 {{ money(item.totalAmount) }} · 餐补 {{ money(item.mealAllowanceTotalAmount ?? 0) }}{{ item.mealAllowanceStatus && item.mealAllowanceTotalAmount == null ? '（待核定）' : '' }}</p>
-        <div class="claim-mobile-status"><el-tag :type="statusType(item.status)" effect="plain">{{ statusLabels[item.status] }}</el-tag><el-tag :type="item.payoutStatus === 'Paid' ? 'success' : item.payoutStatus === 'Pending' ? 'warning' : 'info'" effect="plain">报销{{ payoutLabels[item.payoutStatus] }}</el-tag><el-tag v-if="item.mealAllowanceStatus" effect="plain">{{ mealStatusLabels[item.mealAllowanceStatus] }}</el-tag></div>
+        <div class="claim-mobile-status"><el-tag :type="statusType(item.status)" effect="plain">{{ statusLabels[item.status] }}</el-tag><el-tag :type="item.payoutStatus === 'Paid' ? 'success' : item.payoutStatus === 'Pending' ? 'warning' : 'info'" effect="plain">报销{{ payoutLabels[item.payoutStatus] }}</el-tag><el-tag v-if="item.mealAllowanceStatus" effect="plain">{{ mealStatusLabels[item.mealAllowanceStatus] }}</el-tag><el-tag v-if="item.archiveBatchId" type="info" effect="plain">{{ item.archiveBatchName }}</el-tag></div>
         <p v-if="item.mealAllowanceStatus" class="mobile-record__meta">餐补 {{ item.mealAllowanceDays }} 天 · {{ mealStatusLabels[item.mealAllowanceStatus] }} · {{ payoutStatusLabel(item.mealAllowancePayoutStatus ?? 'NotApplicable') }}</p>
         <div class="mobile-record__actions"><el-button :icon="View" @click="openDetail(item)">查看</el-button><template v-if="item.status === 'Submitted'"><el-button type="success" plain :icon="Check" @click="openReview(item, 'approve')">批准报销</el-button><el-button type="danger" plain :icon="Close" @click="openReview(item, 'reject')">驳回报销</el-button></template><template v-if="item.mealAllowanceStatus === 'PendingReview'"><el-button type="success" plain :icon="Check" @click="openMealReview(item, 'approve')">批准餐补</el-button><el-button type="danger" plain :icon="Close" @click="openMealReview(item, 'reject')">驳回餐补</el-button></template><el-button v-if="item.status === 'Approved' && item.payoutStatus === 'Pending'" type="warning" plain :icon="Coin" @click="openPayout(item)">报销发放</el-button><el-button v-if="item.mealAllowanceStatus === 'Approved' && item.mealAllowancePayoutStatus === 'Pending'" type="primary" plain :icon="Coin" @click="openMealPayout(item)">餐补发放</el-button></div>
       </article>
@@ -360,6 +455,43 @@ onMounted(async () => { await loadOptions(); await load() })
       </el-form>
       <el-alert title="将下载包含 Excel 和报销凭证文件夹的 ZIP；日期留空时默认导出上月 10 日至本月 10 日（含首尾当天）的已提交记录。" type="info" :closable="false" show-icon />
       <template #footer><el-button @click="exportOpen = false">取消</el-button><el-button type="primary" :icon="Download" :loading="exporting" @click="exportClaims">导出 ZIP</el-button></template>
+    </el-dialog>
+
+    <el-dialog v-model="archiveOpen" title="月度报销归档" width="min(940px, calc(100vw - 32px))" :close-on-click-modal="false">
+      <div v-loading="archiveLoading" class="archive-workbench">
+        <section class="archive-create-panel">
+          <div class="archive-panel-heading"><div><span>新建批次</span><strong>先预览，再冻结成员</strong></div><small>日期按中国时区的报销提交时间计算，覆盖所有项目。</small></div>
+          <el-form label-position="top">
+            <el-form-item label="报销提交日期" required><el-date-picker v-model="archiveDates" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" /></el-form-item>
+            <el-form-item label="归档名称" required><el-input v-model="archiveName" maxlength="200" show-word-limit placeholder="例如：2026 年 8 月报销归档" /></el-form-item>
+          </el-form>
+          <div class="archive-create-actions"><el-button @click="previewArchive">预览范围</el-button><el-button type="primary" :disabled="!archiveCanCreate" @click="createArchiveBatch">创建并冻结成员</el-button></div>
+          <div v-if="archivePreview" class="archive-preview" :class="{ blocked: archivePreview.blockedClaimCount > 0 }">
+            <div><span>范围内报销</span><strong>{{ archivePreview.matchingClaimCount }} 笔</strong></div>
+            <div><span>可归档</span><strong>{{ archivePreview.eligibleClaimCount }} 笔</strong></div>
+            <div><span>报销金额</span><strong>{{ money(archivePreview.reimbursementAmount) }}</strong></div>
+            <div><span>已发餐补</span><strong>{{ archivePreview.mealAllowanceCount }} 笔 · {{ money(archivePreview.mealAllowanceAmount) }}</strong></div>
+            <ul v-if="archivePreview.blockedReasons.length"><li v-for="item in archivePreview.blockedReasons" :key="item.reason">{{ item.reason }} {{ item.count }} 笔</li></ul>
+          </div>
+        </section>
+        <section class="archive-batch-panel">
+          <div class="archive-panel-heading"><div><span>已归档批次</span><strong>{{ archiveBatches.length }} 个固定批次</strong></div><small>可改名称；成员和日期范围不可调整。</small></div>
+          <el-table class="archive-batch-table" :data="archiveBatches" max-height="390" empty-text="尚未创建归档批次。">
+            <el-table-column label="批次" min-width="175"><template #default="scope"><div class="primary-cell"><strong>{{ scope.row.name }}</strong><span>总金额 {{ money(scope.row.reimbursementAmount + scope.row.mealAllowanceAmount) }}</span><span>创建人：{{ scope.row.createdByName }}</span></div></template></el-table-column>
+            <el-table-column label="范围 / 成员" min-width="180"><template #default="scope"><div class="primary-cell"><strong>{{ scope.row.submittedFrom }} 至 {{ scope.row.submittedTo }}</strong><span>{{ scope.row.claimCount }} 笔固定成员</span></div></template></el-table-column>
+            <el-table-column label="操作" width="96" fixed="right"><template #default="scope"><el-tooltip content="修改名称"><el-button text circle :icon="Edit" aria-label="修改归档名称" @click="renameArchiveBatch(scope.row)" /></el-tooltip><el-tooltip content="按固定成员重新导出"><el-button text circle :icon="Download" aria-label="重新导出归档批次" @click="exportArchiveBatch(scope.row)" /></el-tooltip></template></el-table-column>
+          </el-table>
+          <div class="archive-batch-mobile-list">
+            <article v-for="batch in archiveBatches" :key="batch.id">
+              <div><strong>{{ batch.name }}</strong><span>{{ batch.submittedFrom }} 至 {{ batch.submittedTo }}</span></div>
+              <dl><div><dt>成员</dt><dd>{{ batch.claimCount }} 笔</dd></div><div><dt>总金额</dt><dd>{{ money(batch.reimbursementAmount + batch.mealAllowanceAmount) }}</dd></div><div><dt>创建人</dt><dd>{{ batch.createdByName }}</dd></div></dl>
+              <footer><el-button size="small" :icon="Edit" @click="renameArchiveBatch(batch)">改名</el-button><el-button size="small" :icon="Download" @click="exportArchiveBatch(batch)">重新导出</el-button></footer>
+            </article>
+            <p v-if="archiveBatches.length === 0">尚未创建归档批次。</p>
+          </div>
+        </section>
+      </div>
+      <template #footer><el-button @click="archiveOpen = false">关闭</el-button></template>
     </el-dialog>
 
     <ClaimDetailDrawer v-model="detailOpen" :claim-id="detailClaimId" :include-superseded-versions="detailIncludesSuperseded" />

@@ -22,6 +22,29 @@ public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore
     public async Task<MonthlyClaimArchiveResult> CreateArchiveAsync(Guid projectId, DateOnly? submittedFrom, DateOnly? submittedTo, CancellationToken cancellationToken)
     {
         var package = await CreatePackageAsync(projectId, submittedFrom, submittedTo, cancellationToken);
+        return await WriteArchiveAsync(package, cancellationToken);
+    }
+
+    public async Task<MonthlyClaimArchiveResult> CreateBatchArchiveAsync(Guid batchId, CancellationToken cancellationToken)
+    {
+        var batch = await db.ClaimArchiveBatches.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == batchId, cancellationToken)
+            ?? throw new ApiProblemException(StatusCodes.Status404NotFound, "ARCHIVE_BATCH_NOT_FOUND", "归档批次不存在。");
+        var claims = await ClaimsForExport()
+            .Where(claim => claim.ArchiveBatchId == batchId)
+            .OrderBy(claim => claim.SubmittedAt)
+            .ThenBy(claim => claim.ClaimNumber)
+            .ToListAsync(cancellationToken);
+        var package = BuildPackage(
+            claims,
+            $"报销归档_{SafeFileToken(batch.Name, "归档批次")}_{batch.SubmittedFrom:yyyyMMdd}_{batch.SubmittedTo:yyyyMMdd}.xlsx",
+            batch.SubmittedFrom,
+            batch.SubmittedTo);
+        return await WriteArchiveAsync(package, cancellationToken);
+    }
+
+    private async Task<MonthlyClaimArchiveResult> WriteArchiveAsync(MonthlyClaimExportPackage package, CancellationToken cancellationToken)
+    {
         var archiveFileName = Path.ChangeExtension(package.WorkbookFileName, ".zip");
         var tempPath = Path.Combine(Path.GetTempPath(), $"travel-reimbursement-export-{Guid.NewGuid():N}.zip");
         try
@@ -56,12 +79,7 @@ public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore
 
         var fromInstant = new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(8)).ToUniversalTime();
         var toExclusive = new DateTimeOffset(to.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(8)).ToUniversalTime();
-        var claims = await db.ReimbursementClaims.AsNoTracking()
-            .Include(x => x.Applicant)
-            .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.ExpenseItems)
-                .ThenInclude(x => x.AttachmentLinks).ThenInclude(x => x.AttachmentAsset)
-            .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.TravelItinerary)
-            .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.MealAllowance)
+        var claims = await ClaimsForExport()
             .Where(x => x.CurrentVersion != null
                 && x.CurrentVersion.ProjectId == projectId
                 && x.SubmittedAt != null
@@ -70,6 +88,25 @@ public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore
                 && x.Status != ClaimStatus.Draft)
             .OrderBy(x => x.SubmittedAt).ThenBy(x => x.ClaimNumber)
             .ToListAsync(cancellationToken);
+
+        var safeCode = string.Concat(project.Code.Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_'));
+        return BuildPackage(claims, $"报销导出_{safeCode}_{from:yyyyMMdd}_{to:yyyyMMdd}.xlsx", from, to);
+    }
+
+    private IQueryable<ReimbursementClaim> ClaimsForExport() => db.ReimbursementClaims.AsNoTracking()
+        .Include(x => x.Applicant)
+        .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.ExpenseItems)
+            .ThenInclude(x => x.AttachmentLinks).ThenInclude(x => x.AttachmentAsset)
+        .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.TravelItinerary)
+        .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.MealAllowance)
+        .Where(x => x.CurrentVersion != null);
+
+    private static MonthlyClaimExportPackage BuildPackage(
+        IReadOnlyList<ReimbursementClaim> claims,
+        string workbookFileName,
+        DateOnly from,
+        DateOnly to)
+    {
 
         var summary = new List<object?[]>
         {
@@ -115,9 +152,15 @@ public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore
                 link.AttachmentAsset.OriginalFileName,
                 link.AttachmentAsset.ObjectKey))))
             .ToList();
-        var safeCode = string.Concat(project.Code.Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_'));
-        var workbookFileName = $"报销导出_{safeCode}_{from:yyyyMMdd}_{to:yyyyMMdd}.xlsx";
         return new MonthlyClaimExportPackage(content, workbookFileName, from, to, claims.Count, attachments);
+    }
+
+    private static string SafeFileToken(string? value, string fallback)
+    {
+        var safe = new string((value ?? string.Empty).Trim().Select(character =>
+            character < ' ' || Path.GetInvalidFileNameChars().Contains(character) ? '_' : character).ToArray()).Trim('.', ' ');
+        if (string.IsNullOrWhiteSpace(safe)) safe = fallback;
+        return safe.Length <= 80 ? safe : safe[..80];
     }
 
     private static string? FormatInstant(DateTimeOffset? value) => value?.ToOffset(TimeSpan.FromHours(8)).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);

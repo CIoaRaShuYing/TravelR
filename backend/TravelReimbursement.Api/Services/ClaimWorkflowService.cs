@@ -68,6 +68,7 @@ public sealed class ClaimWorkflowService(AppDbContext db, IBankCardProtector ban
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var claim = await LoadClaimAsync(claimId, cancellationToken) ?? throw NotFound();
         EnsureOwner(claim, applicantId);
+        EnsureNotArchived(claim);
         EnsureExpectedVersion(claim, request.ExpectedCurrentVersionId, request.ConcurrencyToken);
         if (claim.Status is ClaimStatus.Approved or ClaimStatus.Cancelled)
             throw Conflict("CLAIM_NOT_EDITABLE", "该报销已经批准或作废，不能继续编辑。");
@@ -126,6 +127,7 @@ public sealed class ClaimWorkflowService(AppDbContext db, IBankCardProtector ban
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var claim = await LoadClaimAsync(claimId, cancellationToken) ?? throw NotFound();
         EnsureOwner(claim, applicantId);
+        EnsureNotArchived(claim);
         EnsureExpectedVersion(claim, request.ExpectedCurrentVersionId, request.ConcurrencyToken);
         if (claim.Status != ClaimStatus.Draft)
             throw Conflict("CLAIM_STATUS_CONFLICT", "只有当前草稿可以提交审核。");
@@ -167,6 +169,7 @@ public sealed class ClaimWorkflowService(AppDbContext db, IBankCardProtector ban
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var claim = await LoadClaimAsync(claimId, cancellationToken) ?? throw NotFound();
         EnsureOwner(claim, applicantId);
+        EnsureNotArchived(claim);
         EnsureExpectedVersion(claim, request.ExpectedCurrentVersionId, request.ConcurrencyToken);
         if (claim.Status is ClaimStatus.Approved or ClaimStatus.Cancelled)
             throw Conflict("CLAIM_NOT_CANCELLABLE", "已批准或已作废的报销不能删除。");
@@ -223,6 +226,7 @@ public sealed class ClaimWorkflowService(AppDbContext db, IBankCardProtector ban
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var claim = await LoadClaimAsync(claimId, cancellationToken) ?? throw NotFound();
+        EnsureNotArchived(claim);
         EnsureExpectedVersion(claim, request.ExpectedCurrentVersionId, request.ConcurrencyToken);
         if (claim.Status != ClaimStatus.Approved || claim.PayoutStatus != PayoutStatus.Pending)
             throw Conflict("PAYOUT_STATUS_CONFLICT", "只有已批准且待发放的报销可以确认发放。");
@@ -265,6 +269,7 @@ public sealed class ClaimWorkflowService(AppDbContext db, IBankCardProtector ban
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var claim = await LoadClaimAsync(claimId, cancellationToken) ?? throw NotFound();
+        EnsureNotArchived(claim);
         EnsureExpectedVersion(claim, request.ExpectedCurrentVersionId, request.ClaimConcurrencyToken);
         var meal = claim.CurrentVersion?.MealAllowance ?? throw Conflict("MEAL_ALLOWANCE_NOT_FOUND", "该报销没有餐补记录。");
         EnsureMealExpected(meal, request.MealConcurrencyToken);
@@ -296,6 +301,7 @@ public sealed class ClaimWorkflowService(AppDbContext db, IBankCardProtector ban
     {
         var claim = await db.ReimbursementClaims
             .Include(x => x.Applicant)
+            .Include(x => x.ArchiveBatch)
             .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.Project)
             .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.TravelItinerary)
             .Include(x => x.CurrentVersion)!.ThenInclude(x => x!.MealAllowance)!.ThenInclude(x => x!.ApprovalRecords)
@@ -351,6 +357,7 @@ public sealed class ClaimWorkflowService(AppDbContext db, IBankCardProtector ban
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var claim = await LoadClaimAsync(claimId, cancellationToken) ?? throw NotFound();
+        EnsureNotArchived(claim);
         EnsureExpectedVersion(claim, request.ExpectedCurrentVersionId, request.ClaimConcurrencyToken);
         if (claim.Status != ClaimStatus.Approved)
             throw Conflict("TRAVEL_REVIEW_REQUIRED", "必须先批准差旅报销，才能审核餐补。");
@@ -397,6 +404,7 @@ public sealed class ClaimWorkflowService(AppDbContext db, IBankCardProtector ban
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var claim = await LoadClaimAsync(claimId, cancellationToken) ?? throw NotFound();
+        EnsureNotArchived(claim);
         EnsureExpectedVersion(claim, request.ExpectedCurrentVersionId, request.ConcurrencyToken);
         if (claim.Status != ClaimStatus.Submitted)
             throw Conflict("CLAIM_STATUS_CONFLICT", "该报销当前不在待审批状态。");
@@ -579,5 +587,10 @@ public sealed class ClaimWorkflowService(AppDbContext db, IBankCardProtector ban
     private static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static ApiProblemException Validation(string field, string message) => new(StatusCodes.Status400BadRequest, "VALIDATION_FAILED", message, new() { [field] = [message] });
     private static ApiProblemException Conflict(string code, string message) => new(StatusCodes.Status409Conflict, code, message);
+    private static void EnsureNotArchived(ReimbursementClaim claim)
+    {
+        if (claim.ArchiveBatchId.HasValue)
+            throw Conflict("CLAIM_ARCHIVED", "该报销已归档，不能再修改、审批或发放。");
+    }
     private static ApiProblemException NotFound() => new(StatusCodes.Status404NotFound, "CLAIM_NOT_FOUND", "报销不存在。");
 }

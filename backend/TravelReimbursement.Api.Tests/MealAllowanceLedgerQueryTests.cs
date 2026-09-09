@@ -48,6 +48,23 @@ public sealed class MealAllowanceLedgerQueryTests
         Assert.Empty(result);
     }
 
+    [Fact]
+    public void Apply_filters_meal_allowances_by_exact_archive_batch()
+    {
+        var archiveBatchId = Guid.NewGuid();
+        var matching = Claim(Guid.NewGuid(), Guid.NewGuid(), null, null);
+        matching.ArchiveBatchId = archiveBatchId;
+        var otherBatch = Claim(Guid.NewGuid(), Guid.NewGuid(), null, null);
+        otherBatch.ArchiveBatchId = Guid.NewGuid();
+        var unarchived = Claim(Guid.NewGuid(), Guid.NewGuid(), null, null);
+
+        var result = MealAllowanceLedgerQuery.Apply(
+            new[] { matching, otherBatch, unarchived }.AsQueryable(),
+            null, null, null, null, "all", archiveBatchId).ToList();
+
+        Assert.Equal(new[] { matching }, result);
+    }
+
     private static ReimbursementClaim Claim(Guid projectId, Guid applicantId, DateOnly? departureDate, DateOnly? returnDate, bool withMealAllowance = true)
     {
         var claim = new ReimbursementClaim { ApplicantId = applicantId };

@@ -93,6 +93,10 @@ watch(() => props.modelValue, open => { if (open) initialize() })
       </header>
 
       <template v-if="detail && selectedVersion">
+        <el-alert v-if="detail.archiveBatch" class="claim-archive-notice" type="info" :closable="false" show-icon>
+          <template #title>已归档至“{{ detail.archiveBatch.name }}”</template>
+          <p>{{ detail.archiveBatch.submittedFrom }} 至 {{ detail.archiveBatch.submittedTo }} · 归档后报销及餐补内容不可修改。</p>
+        </el-alert>
         <div class="version-layout" :class="{ 'version-layout--single': !showVersionHistory }">
           <aside v-if="showVersionHistory" class="version-rail">
             <p>版本历史</p>
