@@ -76,6 +76,62 @@ public sealed class XlsxWorkbookWriterTests
     }
 
     [Fact]
+    public void Approved_meal_allowance_is_added_as_a_separate_summary_row()
+    {
+        var claim = new ReimbursementClaim
+        {
+            ClaimNumber = "BX-001",
+            Applicant = new AppUser { DisplayName = "申请人", PersonalName = "张三" },
+            SubmittedAt = new DateTimeOffset(2026, 9, 1, 2, 0, 0, TimeSpan.Zero)
+        };
+        var version = new ClaimVersion
+        {
+            ProjectCodeSnapshot = "P-001",
+            ProjectNameSnapshot = "项目一",
+            Description = "客户现场差旅",
+            MealAllowance = new MealAllowance
+            {
+                Status = MealAllowanceStatus.Approved,
+                PayoutStatus = PayoutStatus.Pending,
+                TotalAmount = 180m,
+                ReviewedAt = new DateTimeOffset(2026, 9, 2, 3, 0, 0, TimeSpan.Zero)
+            }
+        };
+
+        var row = MonthlyClaimExportService.CreateApprovedMealAllowanceSummaryDataRow(claim, version);
+
+        Assert.NotNull(row);
+        Assert.Equal("BX-001", row[0]);
+        Assert.Equal("餐补", row[5]);
+        Assert.Equal("客户现场差旅", row[6]);
+        Assert.Equal("已批准", row[7]);
+        Assert.Equal("待发放", row[8]);
+        Assert.Equal(180m, row[9]);
+        Assert.Equal("2026-09-01 10:00:00", row[10]);
+        Assert.Equal("2026-09-02 11:00:00", row[11]);
+        Assert.Equal(13, row.Length);
+    }
+
+    [Theory]
+    [InlineData(MealAllowanceStatus.Draft)]
+    [InlineData(MealAllowanceStatus.PendingTravelReview)]
+    [InlineData(MealAllowanceStatus.PendingReview)]
+    [InlineData(MealAllowanceStatus.Rejected)]
+    [InlineData(MealAllowanceStatus.Cancelled)]
+    public void Unapproved_meal_allowance_is_not_added_to_summary(MealAllowanceStatus status)
+    {
+        var claim = new ReimbursementClaim { Applicant = new AppUser() };
+        var version = new ClaimVersion
+        {
+            MealAllowance = new MealAllowance { Status = status, TotalAmount = 180m }
+        };
+
+        var row = MonthlyClaimExportService.CreateApprovedMealAllowanceSummaryDataRow(claim, version);
+
+        Assert.Null(row);
+    }
+
+    [Fact]
     public void Export_enum_labels_are_chinese()
     {
         Assert.Equal("差旅行程", MonthlyClaimExportService.ClaimTypeLabel(ClaimType.Travel));

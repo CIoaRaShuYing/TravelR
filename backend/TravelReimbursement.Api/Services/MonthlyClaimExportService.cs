@@ -78,11 +78,21 @@ public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore
         var expenses = new List<object?[]> { new object?[] { "报销单号", "费用类别", "费用日期", "金额", "商户/承运方", "说明" } };
         var travel = new List<object?[]> { new object?[] { "报销单号", "出发地", "目的地", "出发日期", "返程日期" } };
         var meals = new List<object?[]> { new object?[] { "报销单号", "餐补天数", "每日金额", "餐补总额", "餐补状态", "餐补发放状态" } };
+        var summaryItemCount = 0;
+        var summaryTotalAmount = 0m;
 
         foreach (var claim in claims)
         {
             var version = claim.CurrentVersion!;
             summary.Add(CreateSummaryDataRow(claim, version));
+            summaryItemCount++;
+            summaryTotalAmount += version.TotalAmount;
+            if (CreateApprovedMealAllowanceSummaryDataRow(claim, version) is { } mealAllowanceRow)
+            {
+                summary.Add(mealAllowanceRow);
+                summaryItemCount++;
+                summaryTotalAmount += version.MealAllowance!.TotalAmount!.Value;
+            }
             foreach (var item in version.ExpenseItems.OrderBy(x => x.ExpenseDate).ThenBy(x => x.Category))
                 expenses.Add([claim.ClaimNumber, item.Category.ToString(), item.ExpenseDate?.ToString("yyyy-MM-dd"), item.Amount, item.Merchant, item.Note]);
             if (version.TravelItinerary is { } itinerary)
@@ -90,7 +100,7 @@ public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore
             if (version.MealAllowance is { } meal)
                 meals.Add([claim.ClaimNumber, meal.Days, meal.DailyAmount, meal.TotalAmount, meal.Status.ToString(), meal.PayoutStatus.ToString()]);
         }
-        summary.Add(CreateSummaryTotalRow(claims.Count, claims.Sum(claim => claim.CurrentVersion!.TotalAmount)));
+        summary.Add(CreateSummaryTotalRow(summaryItemCount, summaryTotalAmount));
 
         var content = XlsxWorkbookWriter.Write([
             new("报销汇总", summary),
@@ -122,6 +132,20 @@ public sealed class MonthlyClaimExportService(AppDbContext db, IPrivateFileStore
             ClaimStatusLabel(claim.Status), PayoutStatusLabel(claim.PayoutStatus), version.TotalAmount,
             FormatInstant(claim.SubmittedAt), FormatInstant(claim.ReviewedAt), FormatInstant(claim.PaidAt)
         ];
+
+    internal static object?[]? CreateApprovedMealAllowanceSummaryDataRow(ReimbursementClaim claim, ClaimVersion version)
+    {
+        if (version.MealAllowance is not { Status: MealAllowanceStatus.Approved, TotalAmount: not null } mealAllowance)
+            return null;
+
+        return
+        [
+            claim.ClaimNumber, claim.Applicant.DisplayName, claim.Applicant.PersonalName,
+            version.ProjectCodeSnapshot, version.ProjectNameSnapshot, "餐补", version.Description,
+            "已批准", PayoutStatusLabel(mealAllowance.PayoutStatus), mealAllowance.TotalAmount.Value,
+            FormatInstant(claim.SubmittedAt), FormatInstant(mealAllowance.ReviewedAt), FormatInstant(mealAllowance.PaidAt)
+        ];
+    }
 
     internal static string ClaimTypeLabel(ClaimType value) => value switch
     {
