@@ -3,6 +3,7 @@ export type RegistrationRequestStatus = 'Pending' | 'Approved' | 'Rejected'
 export type ClaimType = 'Travel' | 'General'
 export type ClaimStatus = 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Cancelled'
 export type PayoutStatus = 'NotApplicable' | 'Pending' | 'Paid'
+export type PayrollPeriodStatus = 'Draft' | 'ReadyForPayout' | 'Completed' | 'Cancelled'
 export type ArchiveState = 'all' | 'archived' | 'unarchived'
 export type MealAllowanceStatus = 'Draft' | 'PendingTravelReview' | 'PendingReview' | 'Approved' | 'Rejected' | 'Cancelled'
 export type ExpenseCategory = 'DepartureTransport' | 'ReturnTransport' | 'Lodging' | 'OfficeSupplies' | 'Meal' | 'Other' | 'Unspecified'
@@ -17,6 +18,100 @@ export type Session = {
 export type UserProfile = { personalName?: string | null; bankCardNumber?: string | null; profileIncomplete: boolean }
 
 export type PagedResult<T> = { items: T[]; page: number; pageSize: number; total: number }
+
+export type PayrollPeriodSummary = {
+  id: string
+  payrollMonth: string
+  status: PayrollPeriodStatus
+  employeeCount: number
+  paidCount: number
+  pendingCount: number
+  grossTotal: number
+  deductionTotal: number
+  netTotal: number
+  paidNetTotal: number
+  pendingNetTotal: number
+  concurrencyToken: string
+  createdAt: string
+  updatedAt: string
+  lockedAt?: string | null
+  completedAt?: string | null
+  cancelledAt?: string | null
+}
+
+export type PayrollPayoutReceipt = {
+  amount: number
+  recipientName: string
+  bankCardLastFour: string
+  confirmedById: string
+  confirmedByDisplayName?: string | null
+  confirmedAt: string
+  note?: string | null
+}
+
+export type PayrollEntry = {
+  id: string
+  userId: string
+  employeeDisplayNameSnapshot: string
+  employeePersonalNameSnapshot?: string | null
+  bankCardLastFourSnapshot?: string | null
+  baseSalary: number
+  performanceSalary: number
+  bonus: number
+  allowance: number
+  otherIncrease: number
+  socialSecurityDeduction: number
+  housingFundDeduction: number
+  individualIncomeTax: number
+  otherDeduction: number
+  grossPay: number
+  totalDeductions: number
+  netPay: number
+  note?: string | null
+  payoutStatus: PayoutStatus
+  paidAt?: string | null
+  concurrencyToken: string
+  payoutRecord?: PayrollPayoutReceipt | null
+}
+
+export type PayrollPeriodDetail = { period: PayrollPeriodSummary; entries: PayrollEntry[] }
+
+export type PayrollCandidate = {
+  id: string
+  displayName: string
+  personalName?: string | null
+  phoneNumber: string
+  isActive: boolean
+  personalNameReady: boolean
+  bankCardReady: boolean
+}
+
+export type PayrollEntryInput = Pick<PayrollEntry,
+  'id' | 'baseSalary' | 'performanceSalary' | 'bonus' | 'allowance' | 'otherIncrease' |
+  'socialSecurityDeduction' | 'housingFundDeduction' | 'individualIncomeTax' | 'otherDeduction' | 'note'> & {
+    entryConcurrencyToken: string
+  }
+
+export type MyPayroll = {
+  id: string
+  payrollMonth: string
+  employeeName: string
+  baseSalary: number
+  performanceSalary: number
+  bonus: number
+  allowance: number
+  otherIncrease: number
+  socialSecurityDeduction: number
+  housingFundDeduction: number
+  individualIncomeTax: number
+  otherDeduction: number
+  grossPay: number
+  totalDeductions: number
+  netPay: number
+  note?: string | null
+  bankCardLastFour: string
+  paidAt: string
+}
 
 export type Project = {
   id: string
@@ -475,6 +570,7 @@ export const api = {
   changePassword: (body: { currentPassword: string; newPassword: string }) => request<{ message: string }>('/me/password', { method: 'PUT', body: JSON.stringify(body) }),
   getProfile: () => request<UserProfile>('/me/profile'),
   updateProfile: (body: { personalName: string; bankCardNumber: string }) => request<UserProfile>('/me/profile', { method: 'PUT', body: JSON.stringify(body) }),
+  listMyPayroll: () => request<MyPayroll[]>('/payrolls/mine'),
   listWeeklyReports: (filters: { projectId?: string; weekFrom?: string; weekTo?: string; page?: number; pageSize?: number }) => request<PagedResult<WeeklyReport>>(`/weekly-reports${queryString(filters)}`),
   listAdminWeeklyReports: (filters: { projectId?: string; authorId?: string; weekFrom?: string; weekTo?: string; page?: number; pageSize?: number }) => request<PagedResult<WeeklyReport>>(`/admin/weekly-reports${queryString(filters)}`),
   exportWeeklyReports: (filters: { projectId?: string; weekFrom?: string; weekTo?: string }) => download(`/weekly-reports/export.xlsx${queryString(filters)}`),
@@ -500,6 +596,18 @@ export const api = {
   recordBankCardCopied: (id: string) => request<void>(`/admin/users/${id}/bank-card/copied`, { method: 'POST', body: '{}' }),
   getPaymentProfile: (id: string) => request<PaymentProfile>(`/admin/users/${id}/payment-profile`),
   listApplicants: (filters: { keyword?: string; page?: number; pageSize?: number }) => request<PagedResult<ApplicantOption>>(`/admin/applicants${queryString(filters)}`),
+  listPayrollPeriods: () => request<PayrollPeriodSummary[]>('/admin/payroll-periods'),
+  createPayrollPeriod: (payrollMonth: string) => request<PayrollPeriodDetail>('/admin/payroll-periods', { method: 'POST', body: JSON.stringify({ payrollMonth }) }),
+  getPayrollPeriod: (id: string) => request<PayrollPeriodDetail>(`/admin/payroll-periods/${id}`),
+  listPayrollCandidates: (id: string, keyword?: string) => request<PayrollCandidate[]>(`/admin/payroll-periods/${id}/candidates${queryString({ keyword })}`),
+  addPayrollEntries: (id: string, body: { periodConcurrencyToken: string; userIds: string[] }) => request<PayrollPeriodDetail>(`/admin/payroll-periods/${id}/entries`, { method: 'POST', body: JSON.stringify(body) }),
+  savePayrollEntries: (id: string, body: { periodConcurrencyToken: string; entries: PayrollEntryInput[] }) => request<PayrollPeriodDetail>(`/admin/payroll-periods/${id}/entries`, { method: 'PUT', body: JSON.stringify(body) }),
+  removePayrollEntry: (periodId: string, entryId: string, body: { periodConcurrencyToken: string; entryConcurrencyToken: string }) => request<PayrollPeriodDetail>(`/admin/payroll-periods/${periodId}/entries/${entryId}/remove`, { method: 'POST', body: JSON.stringify(body) }),
+  lockPayrollPeriod: (id: string, concurrencyToken: string) => request<PayrollPeriodDetail>(`/admin/payroll-periods/${id}/lock`, { method: 'POST', body: JSON.stringify({ concurrencyToken }) }),
+  returnPayrollPeriodToDraft: (id: string, concurrencyToken: string) => request<PayrollPeriodDetail>(`/admin/payroll-periods/${id}/return-to-draft`, { method: 'POST', body: JSON.stringify({ concurrencyToken }) }),
+  cancelPayrollPeriod: (id: string, concurrencyToken: string) => request<PayrollPeriodDetail>(`/admin/payroll-periods/${id}/cancel`, { method: 'POST', body: JSON.stringify({ concurrencyToken }) }),
+  confirmPayrollPayout: (periodId: string, entryId: string, body: { periodConcurrencyToken: string; entryConcurrencyToken: string; note?: string }) => request<PayrollPeriodDetail>(`/admin/payroll-periods/${periodId}/entries/${entryId}/payout/confirm`, { method: 'POST', body: JSON.stringify(body) }),
+  exportPayrollPeriod: (id: string) => download(`/admin/payroll-periods/${id}/export.xlsx`),
   listProjects: (filters: { isActive?: boolean; keyword?: string; page?: number; pageSize?: number }) => request<PagedResult<Project>>(`/admin/projects${queryString(filters)}`),
   createProject: (body: { code: string; name: string; description?: string }) => request<Project>('/admin/projects', { method: 'POST', body: JSON.stringify(body) }),
   updateProject: (id: string, body: { name: string; description?: string; concurrencyToken: string }) => request<Project>(`/admin/projects/${id}`, { method: 'PUT', body: JSON.stringify(body) }),

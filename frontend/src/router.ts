@@ -11,6 +11,8 @@ import AdminReimbursementDashboardView from './views/AdminReimbursementDashboard
 import ProfileView from './views/ProfileView.vue'
 import WeeklyReportsView from './views/WeeklyReportsView.vue'
 import MeetingRecordsView from './views/MeetingRecordsView.vue'
+import MyPayrollView from './views/MyPayrollView.vue'
+import AdminPayrollView from './views/AdminPayrollView.vue'
 import { isAdministrator, profileIncomplete, session } from './session'
 
 export const router = createRouter({
@@ -18,6 +20,7 @@ export const router = createRouter({
   routes: [
     { path: '/', redirect: '/claims' },
     { path: '/claims', component: MyClaimsView, meta: { title: '我的报销' } },
+    { path: '/payroll', component: MyPayrollView, meta: { title: '我的工资' } },
     { path: '/account/profile', component: ProfileView, meta: { title: '个人资料' } },
     { path: '/account/security', component: AccountSecurityView, meta: { title: '账号安全' } },
     { path: '/weekly-reports', component: WeeklyReportsView, meta: { title: '项目周报' } },
@@ -26,6 +29,7 @@ export const router = createRouter({
     { path: '/admin/registrations', component: AdminRegistrationsView, meta: { title: '注册审批', administrator: true } },
     { path: '/admin/projects', component: AdminProjectsView, meta: { title: '项目管理', administrator: true } },
     { path: '/admin/claims', component: AdminClaimsView, meta: { title: '报销管理', administrator: true } },
+    { path: '/admin/payroll', component: AdminPayrollView, meta: { title: '工资管理', administrator: true } },
     { path: '/admin/reimbursement-dashboard', component: AdminReimbursementDashboardView, meta: { title: '报销看板', administrator: true } },
     { path: '/admin/meal-allowances', component: AdminMealAllowancesView, meta: { title: '餐补看板', administrator: true } },
     { path: '/admin/settings', component: AdminSettingsView, meta: { title: '注册策略', administrator: true } },

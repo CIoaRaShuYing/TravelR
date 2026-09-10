@@ -60,4 +60,29 @@ public sealed class BusinessModelTests
         Assert.True(batchEntity.FindProperty(nameof(ClaimArchiveBatch.ConcurrencyToken))!.IsConcurrencyToken);
         Assert.True(claimEntity.FindProperty(nameof(ReimbursementClaim.ConcurrencyToken))!.IsConcurrencyToken);
     }
+
+    [Fact]
+    public void Payroll_model_has_month_employee_and_payout_uniqueness()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseNpgsql("Host=localhost;Database=model_only;Username=model_only;Password=model_only")
+            .Options;
+        using var db = new AppDbContext(options);
+
+        var period = db.Model.FindEntityType(typeof(PayrollPeriod))!;
+        var entry = db.Model.FindEntityType(typeof(PayrollEntry))!;
+        var payout = db.Model.FindEntityType(typeof(PayrollPayoutRecord))!;
+        var monthIndex = period.GetIndexes().Single(index => index.IsUnique);
+        var employeeIndex = entry.GetIndexes().Single(index => index.IsUnique);
+        var payoutIndex = payout.GetIndexes().Single(index => index.IsUnique);
+
+        Assert.Equal(new[] { nameof(PayrollPeriod.PayrollMonth) }, monthIndex.Properties.Select(property => property.Name));
+        Assert.Equal("\"Status\" <> 'Cancelled'", monthIndex.GetFilter());
+        Assert.Equal(new[] { nameof(PayrollEntry.PayrollPeriodId), nameof(PayrollEntry.UserId) }, employeeIndex.Properties.Select(property => property.Name));
+        Assert.Equal(new[] { nameof(PayrollPayoutRecord.PayrollEntryId) }, payoutIndex.Properties.Select(property => property.Name));
+        Assert.True(period.FindProperty(nameof(PayrollPeriod.ConcurrencyToken))!.IsConcurrencyToken);
+        Assert.True(entry.FindProperty(nameof(PayrollEntry.ConcurrencyToken))!.IsConcurrencyToken);
+        Assert.Equal(DeleteBehavior.Restrict, entry.GetForeignKeys().Single(key => key.PrincipalEntityType.ClrType == typeof(PayrollPeriod)).DeleteBehavior);
+        Assert.Equal(DeleteBehavior.Restrict, payout.GetForeignKeys().Single(key => key.PrincipalEntityType.ClrType == typeof(PayrollEntry)).DeleteBehavior);
+    }
 }

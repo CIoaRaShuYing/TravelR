@@ -83,6 +83,41 @@ public sealed record ConfirmMealAllowancePayoutRequest(
     Guid MealConcurrencyToken,
     [property: StringLength(1000)] string? Note);
 
+public sealed record CreatePayrollPeriodRequest(DateOnly PayrollMonth);
+
+public sealed record AddPayrollEntriesRequest(
+    Guid PeriodConcurrencyToken,
+    IReadOnlyList<Guid> UserIds);
+
+public sealed record RemovePayrollEntryRequest(
+    Guid PeriodConcurrencyToken,
+    Guid EntryConcurrencyToken);
+
+public sealed record SavePayrollEntryRequest(
+    Guid Id,
+    Guid EntryConcurrencyToken,
+    [property: Range(typeof(decimal), "0", "999999999")] decimal BaseSalary,
+    [property: Range(typeof(decimal), "0", "999999999")] decimal PerformanceSalary,
+    [property: Range(typeof(decimal), "0", "999999999")] decimal Bonus,
+    [property: Range(typeof(decimal), "0", "999999999")] decimal Allowance,
+    [property: Range(typeof(decimal), "0", "999999999")] decimal OtherIncrease,
+    [property: Range(typeof(decimal), "0", "999999999")] decimal SocialSecurityDeduction,
+    [property: Range(typeof(decimal), "0", "999999999")] decimal HousingFundDeduction,
+    [property: Range(typeof(decimal), "0", "999999999")] decimal IndividualIncomeTax,
+    [property: Range(typeof(decimal), "0", "999999999")] decimal OtherDeduction,
+    [property: StringLength(1000)] string? Note);
+
+public sealed record SavePayrollEntriesRequest(
+    Guid PeriodConcurrencyToken,
+    IReadOnlyList<SavePayrollEntryRequest> Entries);
+
+public sealed record PayrollPeriodActionRequest(Guid ConcurrencyToken);
+
+public sealed record ConfirmPayrollPayoutRequest(
+    Guid PeriodConcurrencyToken,
+    Guid EntryConcurrencyToken,
+    [property: StringLength(1000)] string? Note);
+
 public sealed record ClaimArchiveRangeRequest(
     DateOnly SubmittedFrom,
     DateOnly SubmittedTo);

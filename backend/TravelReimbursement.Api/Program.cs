@@ -78,6 +78,8 @@ builder.Services.AddScoped<WeeklyReportExportService>();
 builder.Services.AddScoped<MeetingRecordService>();
 builder.Services.AddScoped<MeetingRecordExportService>();
 builder.Services.AddScoped<MeetingRecordBackupService>();
+builder.Services.AddScoped<PayrollService>();
+builder.Services.AddScoped<PayrollExportService>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IBankCardProtector, BankCardProtector>();
 builder.Services.AddHostedService<StagedAttachmentCleanupService>();
@@ -381,6 +383,12 @@ secured.MapGet("/attachments/{id:guid}/download", async (Guid id, AppDbContext d
     return Results.File(stream, asset.ContentType, asset.OriginalFileName, enableRangeProcessing: false);
 });
 
+secured.MapGet("/payrolls/mine", async (PayrollService payrollService, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    return Results.Ok(await payrollService.ListMineAsync(GetUserId(principal), cancellationToken));
+});
+
 secured.MapGet("/weekly-reports", async (Guid? projectId, DateOnly? weekFrom, DateOnly? weekTo, int? page, int? pageSize, AppDbContext db, ClaimsPrincipal principal) =>
 {
     var paging = NormalizePaging(page, pageSize);
@@ -522,6 +530,71 @@ secured.MapPut("/meeting-records/{id:guid}", async (
     Results.Ok(await service.UpdateAsync(GetUserId(principal), id, request, context.TraceIdentifier, cancellationToken)));
 
 var admin = secured.MapGroup("/admin").RequireAuthorization(new AuthorizeAttribute { Roles = "Administrator" });
+admin.MapGet("/payroll-periods", async (PayrollService payrollService, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    return Results.Ok(await payrollService.ListPeriodsAsync(cancellationToken));
+});
+admin.MapPost("/payroll-periods", async (CreatePayrollPeriodRequest request, PayrollService payrollService, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    var period = await payrollService.CreatePeriodAsync(GetUserId(principal), request, context.TraceIdentifier, cancellationToken);
+    return Results.Created($"/api/admin/payroll-periods/{period.Period.Id}", period);
+});
+admin.MapGet("/payroll-periods/{periodId:guid}", async (Guid periodId, PayrollService payrollService, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    return Results.Ok(await payrollService.GetPeriodAsync(periodId, cancellationToken));
+});
+admin.MapGet("/payroll-periods/{periodId:guid}/candidates", async (Guid periodId, string? keyword, PayrollService payrollService, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    return Results.Ok(await payrollService.ListCandidatesAsync(periodId, keyword, cancellationToken));
+});
+admin.MapPost("/payroll-periods/{periodId:guid}/entries", async (Guid periodId, AddPayrollEntriesRequest request, PayrollService payrollService, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    return Results.Ok(await payrollService.AddEntriesAsync(GetUserId(principal), periodId, request, context.TraceIdentifier, cancellationToken));
+});
+admin.MapPut("/payroll-periods/{periodId:guid}/entries", async (Guid periodId, SavePayrollEntriesRequest request, PayrollService payrollService, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    return Results.Ok(await payrollService.SaveEntriesAsync(GetUserId(principal), periodId, request, context.TraceIdentifier, cancellationToken));
+});
+admin.MapPost("/payroll-periods/{periodId:guid}/entries/{entryId:guid}/remove", async (Guid periodId, Guid entryId, RemovePayrollEntryRequest request, PayrollService payrollService, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    return Results.Ok(await payrollService.RemoveEntryAsync(GetUserId(principal), periodId, entryId, request, context.TraceIdentifier, cancellationToken));
+});
+admin.MapPost("/payroll-periods/{periodId:guid}/lock", async (Guid periodId, PayrollPeriodActionRequest request, PayrollService payrollService, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    return Results.Ok(await payrollService.LockAsync(GetUserId(principal), periodId, request, context.TraceIdentifier, cancellationToken));
+});
+admin.MapPost("/payroll-periods/{periodId:guid}/return-to-draft", async (Guid periodId, PayrollPeriodActionRequest request, PayrollService payrollService, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    return Results.Ok(await payrollService.ReturnToDraftAsync(GetUserId(principal), periodId, request, context.TraceIdentifier, cancellationToken));
+});
+admin.MapPost("/payroll-periods/{periodId:guid}/cancel", async (Guid periodId, PayrollPeriodActionRequest request, PayrollService payrollService, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    return Results.Ok(await payrollService.CancelAsync(GetUserId(principal), periodId, request, context.TraceIdentifier, cancellationToken));
+});
+admin.MapPost("/payroll-periods/{periodId:guid}/entries/{entryId:guid}/payout/confirm", async (Guid periodId, Guid entryId, ConfirmPayrollPayoutRequest request, PayrollService payrollService, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    return Results.Ok(await payrollService.ConfirmPayoutAsync(GetUserId(principal), periodId, entryId, request, context.TraceIdentifier, cancellationToken));
+});
+admin.MapGet("/payroll-periods/{periodId:guid}/export.xlsx", async (Guid periodId, PayrollExportService exportService, AppDbContext db, ClaimsPrincipal principal, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    var result = await exportService.CreateAsync(periodId, cancellationToken);
+    await AuditAsync(db, GetUserId(principal), "PayrollPeriodExported", "PayrollPeriod", periodId.ToString(), context.TraceIdentifier,
+        System.Text.Json.JsonSerializer.Serialize(new { result.PayrollMonth, result.EmployeeCount }));
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.File(result.Content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", result.FileName);
+});
 admin.MapDelete("/meeting-records/{id:guid}", async (
     Guid id,
     Guid concurrencyToken,

@@ -14,6 +14,7 @@ public enum ExpenseCategory { DepartureTransport, ReturnTransport, Lodging, Offi
 public enum AttachmentScanStatus { Pending, Accepted, Rejected }
 public enum AttachmentBindingStatus { Staged, Bound }
 public enum AttachmentPurpose { Invoice, PaymentRecord }
+public enum PayrollPeriodStatus { Draft, ReadyForPayout, Completed, Cancelled }
 
 public sealed class AppUser : IdentityUser<Guid>
 {
@@ -265,6 +266,73 @@ public sealed class PayoutRecord
     public string? ConfirmedByDisplayName { get; set; }
     public string? Note { get; set; }
     public DateTimeOffset ConfirmedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class PayrollPeriod
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public DateOnly PayrollMonth { get; set; }
+    public PayrollPeriodStatus Status { get; set; } = PayrollPeriodStatus.Draft;
+    public Guid CreatedById { get; set; }
+    public AppUser CreatedBy { get; set; } = null!;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? LockedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public DateTimeOffset? CancelledAt { get; set; }
+    [ConcurrencyCheck]
+    public Guid ConcurrencyToken { get; set; } = Guid.NewGuid();
+    public List<PayrollEntry> Entries { get; set; } = [];
+}
+
+public sealed class PayrollEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid PayrollPeriodId { get; set; }
+    public PayrollPeriod PayrollPeriod { get; set; } = null!;
+    public Guid UserId { get; set; }
+    public AppUser User { get; set; } = null!;
+    public string EmployeeDisplayNameSnapshot { get; set; } = string.Empty;
+    public string? EmployeePersonalNameSnapshot { get; set; }
+    public string? BankCardLastFourSnapshot { get; set; }
+    public decimal BaseSalary { get; set; }
+    public decimal PerformanceSalary { get; set; }
+    public decimal Bonus { get; set; }
+    public decimal Allowance { get; set; }
+    public decimal OtherIncrease { get; set; }
+    public decimal SocialSecurityDeduction { get; set; }
+    public decimal HousingFundDeduction { get; set; }
+    public decimal IndividualIncomeTax { get; set; }
+    public decimal OtherDeduction { get; set; }
+    public decimal GrossPay { get; set; }
+    public decimal TotalDeductions { get; set; }
+    public decimal NetPay { get; set; }
+    public string? Note { get; set; }
+    public PayoutStatus PayoutStatus { get; set; } = PayoutStatus.NotApplicable;
+    public Guid UpdatedById { get; set; }
+    public AppUser UpdatedBy { get; set; } = null!;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? PaidAt { get; set; }
+    [ConcurrencyCheck]
+    public Guid ConcurrencyToken { get; set; } = Guid.NewGuid();
+    public PayrollPayoutRecord? PayoutRecord { get; set; }
+}
+
+public sealed class PayrollPayoutRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid PayrollEntryId { get; set; }
+    public PayrollEntry PayrollEntry { get; set; } = null!;
+    public DateOnly PayrollMonth { get; set; }
+    public decimal Amount { get; set; }
+    public string RecipientName { get; set; } = string.Empty;
+    public string BankCardLastFour { get; set; } = string.Empty;
+    public Guid ConfirmedById { get; set; }
+    [NotMapped]
+    public string? ConfirmedByDisplayName { get; set; }
+    public DateTimeOffset ConfirmedAt { get; set; } = DateTimeOffset.UtcNow;
+    public string? Note { get; set; }
 }
 
 public sealed class WeeklyReport

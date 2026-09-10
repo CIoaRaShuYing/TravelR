@@ -23,6 +23,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ExpenseItemAttachment> ExpenseItemAttachments => Set<ExpenseItemAttachment>();
     public DbSet<ApprovalRecord> ApprovalRecords => Set<ApprovalRecord>();
     public DbSet<PayoutRecord> PayoutRecords => Set<PayoutRecord>();
+    public DbSet<PayrollPeriod> PayrollPeriods => Set<PayrollPeriod>();
+    public DbSet<PayrollEntry> PayrollEntries => Set<PayrollEntry>();
+    public DbSet<PayrollPayoutRecord> PayrollPayoutRecords => Set<PayrollPayoutRecord>();
     public DbSet<WeeklyReport> WeeklyReports => Set<WeeklyReport>();
     public DbSet<MeetingRecord> MeetingRecords => Set<MeetingRecord>();
     public DbSet<MeetingParticipant> MeetingParticipants => Set<MeetingParticipant>();
@@ -192,6 +195,63 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.Property(x => x.Note).HasMaxLength(1000);
             entity.HasOne(x => x.Claim).WithOne(x => x.PayoutRecord).HasForeignKey<PayoutRecord>(x => x.ClaimId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.ApprovedVersion).WithMany().HasForeignKey(x => x.ApprovedVersionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<PayrollPeriod>(entity =>
+        {
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_PayrollPeriods_PayrollMonth",
+                "EXTRACT(DAY FROM \"PayrollMonth\") = 1"));
+            entity.HasIndex(x => x.PayrollMonth).IsUnique().HasFilter("\"Status\" <> 'Cancelled'");
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+            entity.HasOne(x => x.CreatedBy).WithMany().HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasMany(x => x.Entries).WithOne(x => x.PayrollPeriod).HasForeignKey(x => x.PayrollPeriodId).OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<PayrollEntry>(entity =>
+        {
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint("CK_PayrollEntries_Amounts", "\"BaseSalary\" >= 0 AND \"PerformanceSalary\" >= 0 AND \"Bonus\" >= 0 AND \"Allowance\" >= 0 AND \"OtherIncrease\" >= 0 AND \"SocialSecurityDeduction\" >= 0 AND \"HousingFundDeduction\" >= 0 AND \"IndividualIncomeTax\" >= 0 AND \"OtherDeduction\" >= 0 AND \"GrossPay\" >= 0 AND \"TotalDeductions\" >= 0 AND \"NetPay\" >= 0");
+                table.HasCheckConstraint("CK_PayrollEntries_GrossPay", "\"GrossPay\" = \"BaseSalary\" + \"PerformanceSalary\" + \"Bonus\" + \"Allowance\" + \"OtherIncrease\"");
+                table.HasCheckConstraint("CK_PayrollEntries_TotalDeductions", "\"TotalDeductions\" = \"SocialSecurityDeduction\" + \"HousingFundDeduction\" + \"IndividualIncomeTax\" + \"OtherDeduction\"");
+                table.HasCheckConstraint("CK_PayrollEntries_NetPay", "\"NetPay\" = \"GrossPay\" - \"TotalDeductions\"");
+            });
+            entity.HasIndex(x => new { x.PayrollPeriodId, x.UserId }).IsUnique();
+            entity.HasIndex(x => new { x.PayrollPeriodId, x.PayoutStatus });
+            entity.HasIndex(x => new { x.UserId, x.PayoutStatus, x.PayrollPeriodId });
+            entity.Property(x => x.EmployeeDisplayNameSnapshot).HasMaxLength(100);
+            entity.Property(x => x.EmployeePersonalNameSnapshot).HasMaxLength(100);
+            entity.Property(x => x.BankCardLastFourSnapshot).HasMaxLength(4);
+            entity.Property(x => x.BaseSalary).HasPrecision(18, 2);
+            entity.Property(x => x.PerformanceSalary).HasPrecision(18, 2);
+            entity.Property(x => x.Bonus).HasPrecision(18, 2);
+            entity.Property(x => x.Allowance).HasPrecision(18, 2);
+            entity.Property(x => x.OtherIncrease).HasPrecision(18, 2);
+            entity.Property(x => x.SocialSecurityDeduction).HasPrecision(18, 2);
+            entity.Property(x => x.HousingFundDeduction).HasPrecision(18, 2);
+            entity.Property(x => x.IndividualIncomeTax).HasPrecision(18, 2);
+            entity.Property(x => x.OtherDeduction).HasPrecision(18, 2);
+            entity.Property(x => x.GrossPay).HasPrecision(18, 2);
+            entity.Property(x => x.TotalDeductions).HasPrecision(18, 2);
+            entity.Property(x => x.NetPay).HasPrecision(18, 2);
+            entity.Property(x => x.Note).HasMaxLength(1000);
+            entity.Property(x => x.PayoutStatus).HasConversion<string>().HasMaxLength(16);
+            entity.Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.UpdatedBy).WithMany().HasForeignKey(x => x.UpdatedById).OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<PayrollPayoutRecord>(entity =>
+        {
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_PayrollPayoutRecords_BankCardLastFour",
+                "\"BankCardLastFour\" ~ '^[0-9]{4}$'"));
+            entity.HasIndex(x => x.PayrollEntryId).IsUnique();
+            entity.Property(x => x.Amount).HasPrecision(18, 2);
+            entity.Property(x => x.RecipientName).HasMaxLength(100);
+            entity.Property(x => x.BankCardLastFour).HasMaxLength(4);
+            entity.Property(x => x.Note).HasMaxLength(1000);
+            entity.HasOne(x => x.PayrollEntry).WithOne(x => x.PayoutRecord).HasForeignKey<PayrollPayoutRecord>(x => x.PayrollEntryId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.ConfirmedById).OnDelete(DeleteBehavior.Restrict);
         });
         builder.Entity<WeeklyReport>(entity =>
         {

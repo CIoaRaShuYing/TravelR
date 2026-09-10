@@ -11,6 +11,7 @@ const drawerOpen = ref(false)
 const navItems = computed(() => [
   { path: '/account/profile', label: '个人资料', icon: CreditCard, visible: true },
   { path: '/claims', label: '我的报销', icon: Tickets, visible: !profileIncomplete.value },
+  { path: '/payroll', label: '我的工资', icon: Coin, visible: !profileIncomplete.value },
   { path: '/weekly-reports', label: '项目周报', icon: Calendar, visible: !profileIncomplete.value },
   { path: '/meeting-records', label: '会议记录', icon: Memo, visible: !profileIncomplete.value },
   { path: '/account/security', label: '账号安全', icon: Key, visible: true },
@@ -18,6 +19,7 @@ const navItems = computed(() => [
   { path: '/admin/registrations', label: '注册审批', icon: User, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/projects', label: '项目管理', icon: FolderOpened, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/claims', label: '报销管理', icon: DocumentChecked, visible: isAdministrator.value && !profileIncomplete.value },
+  { path: '/admin/payroll', label: '工资管理', icon: CreditCard, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/reimbursement-dashboard', label: '报销看板', icon: DataAnalysis, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/meal-allowances', label: '餐补看板', icon: Coin, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/settings', label: '注册策略', icon: Setting, visible: isAdministrator.value && !profileIncomplete.value },
