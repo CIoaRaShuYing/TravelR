@@ -64,6 +64,28 @@ public sealed class MeetingRecordBackupServiceTests
         }
     }
 
+    [Fact]
+    public async Task Archive_writer_and_validator_use_v2_data_entry()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"meeting-backup-{Guid.NewGuid():N}.zip");
+        var manifest = """{"formatVersion":"meeting-records-backup-manifest.v2"}"""u8.ToArray();
+        var data = """{"formatVersion":"meeting-records.v2","records":[]}"""u8.ToArray();
+        var checksums = Encoding.UTF8.GetBytes($"{Hash(manifest)}  manifest.json\n{Hash(data)}  meeting-records.v2.json\n");
+        try
+        {
+            await MeetingRecordBackupService.WriteArchiveAsync(path, manifest, data, checksums, CancellationToken.None);
+
+            MeetingRecordBackupService.ValidateArchive(path);
+            using var archive = ZipFile.OpenRead(path);
+            Assert.NotNull(archive.GetEntry("meeting-records.v2.json"));
+            Assert.Null(archive.GetEntry("meeting-records.v1.json"));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
     private static void WriteEntry(ZipArchive archive, string name, byte[] content)
     {
         using var stream = archive.CreateEntry(name).Open();

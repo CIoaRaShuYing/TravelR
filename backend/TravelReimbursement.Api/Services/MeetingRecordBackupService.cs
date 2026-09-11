@@ -28,6 +28,7 @@ public sealed class MeetingRecordBackupService(
     TimeProvider timeProvider,
     ILogger<MeetingRecordBackupService> logger)
 {
+    private const string DataFileName = "meeting-records.v2.json";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly MeetingRecordBackupOptions _options = options.Value;
 
@@ -77,9 +78,9 @@ public sealed class MeetingRecordBackupService(
                 slot.ScheduledForUtc,
                 capturedAtUtc,
                 document.Records.Count,
-                "meeting-records.v2.json",
+                DataFileName,
                 dataHash), JsonOptions);
-            var checksums = Encoding.UTF8.GetBytes($"{Sha256(manifest)}  manifest.json\n{dataHash}  meeting-records.v2.json\n");
+            var checksums = Encoding.UTF8.GetBytes($"{Sha256(manifest)}  manifest.json\n{dataHash}  {DataFileName}\n");
 
             await WriteArchiveAsync(temporaryPath, manifest, data, checksums, cancellationToken);
             ValidateArchive(temporaryPath);
@@ -147,10 +148,10 @@ public sealed class MeetingRecordBackupService(
     {
         using var archive = ZipFile.OpenRead(path);
         var manifest = ReadRequiredEntry(archive, "manifest.json");
-        var data = ReadRequiredEntry(archive, "meeting-records.v2.json");
+        var data = ReadRequiredEntry(archive, DataFileName);
         var checksums = Encoding.UTF8.GetString(ReadRequiredEntry(archive, "checksums.sha256"));
         if (!checksums.Contains($"{Sha256(manifest)}  manifest.json", StringComparison.Ordinal)
-            || !checksums.Contains($"{Sha256(data)}  meeting-records.v2.json", StringComparison.Ordinal))
+            || !checksums.Contains($"{Sha256(data)}  {DataFileName}", StringComparison.Ordinal))
             throw new InvalidDataException("会议记录备份校验和不匹配。");
     }
 
@@ -182,12 +183,12 @@ public sealed class MeetingRecordBackupService(
     private static string ResolveRootPath(string contentRoot, string configuredPath) =>
         Path.GetFullPath(Path.IsPathRooted(configuredPath) ? configuredPath : Path.Combine(contentRoot, configuredPath));
 
-    private static async Task WriteArchiveAsync(string path, byte[] manifest, byte[] data, byte[] checksums, CancellationToken cancellationToken)
+    internal static async Task WriteArchiveAsync(string path, byte[] manifest, byte[] data, byte[] checksums, CancellationToken cancellationToken)
     {
         await using var target = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous | FileOptions.WriteThrough);
         using var archive = new ZipArchive(target, ZipArchiveMode.Create, leaveOpen: true);
         await WriteEntryAsync(archive, "manifest.json", manifest, cancellationToken);
-        await WriteEntryAsync(archive, "meeting-records.v1.json", data, cancellationToken);
+        await WriteEntryAsync(archive, DataFileName, data, cancellationToken);
         await WriteEntryAsync(archive, "checksums.sha256", checksums, cancellationToken);
     }
 
