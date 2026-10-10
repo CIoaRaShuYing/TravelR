@@ -13,6 +13,7 @@ import WeeklyReportsView from './views/WeeklyReportsView.vue'
 import MeetingRecordsView from './views/MeetingRecordsView.vue'
 import MyPayrollView from './views/MyPayrollView.vue'
 import AdminPayrollView from './views/AdminPayrollView.vue'
+import AdminCostDashboardView from './views/AdminCostDashboardView.vue'
 import { isAdministrator, profileIncomplete, session } from './session'
 
 export const router = createRouter({
@@ -30,6 +31,7 @@ export const router = createRouter({
     { path: '/admin/projects', component: AdminProjectsView, meta: { title: '项目管理', administrator: true } },
     { path: '/admin/claims', component: AdminClaimsView, meta: { title: '报销管理', administrator: true } },
     { path: '/admin/payroll', component: AdminPayrollView, meta: { title: '工资管理', administrator: true } },
+    { path: '/admin/cost-dashboard', component: AdminCostDashboardView, meta: { title: '总费用看板', administrator: true } },
     { path: '/admin/reimbursement-dashboard', component: AdminReimbursementDashboardView, meta: { title: '报销看板', administrator: true } },
     { path: '/admin/meal-allowances', component: AdminMealAllowancesView, meta: { title: '餐补看板', administrator: true } },
     { path: '/admin/settings', component: AdminSettingsView, meta: { title: '注册策略', administrator: true } },

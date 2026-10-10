@@ -80,6 +80,7 @@ builder.Services.AddScoped<MeetingRecordExportService>();
 builder.Services.AddScoped<MeetingRecordBackupService>();
 builder.Services.AddScoped<PayrollService>();
 builder.Services.AddScoped<PayrollExportService>();
+builder.Services.AddScoped<CostDashboardService>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IBankCardProtector, BankCardProtector>();
 builder.Services.AddHostedService<StagedAttachmentCleanupService>();
@@ -530,6 +531,19 @@ secured.MapPut("/meeting-records/{id:guid}", async (
     Results.Ok(await service.UpdateAsync(GetUserId(principal), id, request, context.TraceIdentifier, cancellationToken)));
 
 var admin = secured.MapGroup("/admin").RequireAuthorization(new AuthorizeAttribute { Roles = "Administrator" });
+
+admin.MapGet("/cost-dashboard", async (CostCategory? category, Guid? userId, Guid? projectId, string? groupBy,
+    int? page, int? pageSize, CostDashboardService service, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    return Results.Ok(await service.GetAsync(category, userId, projectId, groupBy, page, pageSize, cancellationToken));
+});
+
+admin.MapGet("/cost-dashboard/options", async (CostDashboardService service, HttpContext context, CancellationToken cancellationToken) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    return Results.Ok(await service.GetOptionsAsync(cancellationToken));
+});
 admin.MapGet("/payroll-periods", async (PayrollService payrollService, HttpContext context, CancellationToken cancellationToken) =>
 {
     context.Response.Headers.CacheControl = "no-store, private";

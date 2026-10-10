@@ -20,6 +20,7 @@ const navItems = computed(() => [
   { path: '/admin/projects', label: '项目管理', icon: FolderOpened, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/claims', label: '报销管理', icon: DocumentChecked, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/payroll', label: '工资管理', icon: CreditCard, visible: isAdministrator.value && !profileIncomplete.value },
+  { path: '/admin/cost-dashboard', label: '总费用看板', icon: DataAnalysis, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/reimbursement-dashboard', label: '报销看板', icon: DataAnalysis, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/meal-allowances', label: '餐补看板', icon: Coin, visible: isAdministrator.value && !profileIncomplete.value },
   { path: '/admin/settings', label: '注册策略', icon: Setting, visible: isAdministrator.value && !profileIncomplete.value },

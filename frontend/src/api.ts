@@ -228,6 +228,36 @@ export type ExpenseItemDashboardRow = {
 
 export type DashboardGroupRow = { key: string | null; label: string; itemCount: number; totalAmount: number }
 
+export type CostCategory = 'Payroll' | 'Reimbursement' | 'MealAllowance'
+export type CostTotals = {
+  payrollPaid: number; payrollPending: number; payrollTotal: number
+  reimbursementPaid: number; reimbursementPending: number; reimbursementTotal: number
+  mealAllowancePaid: number; mealAllowancePending: number; mealAllowanceTotal: number
+  paidAmount: number; pendingAmount: number; totalAmount: number
+}
+export type CostDashboardOption = { id: string; name: string; description: string }
+export type CostDashboardGroup = CostDashboardOption & { itemCount: number; totals: CostTotals }
+export type CostDashboardItem = {
+  id: string
+  category: CostCategory
+  userId: string
+  userName: string
+  userDisplayName: string
+  projectId: string | null
+  projectName: string | null
+  projectCode: string | null
+  sourceId: string
+  claimNumber: string | null
+  payrollMonth: string | null
+  payoutStatus: 'Pending' | 'Paid'
+  amount: number
+}
+export type CostDashboardResult = PagedResult<CostDashboardItem> & {
+  summary: CostTotals
+  groups: CostDashboardGroup[]
+  payrollExcluded: boolean
+}
+
 export type ClaimArchiveBatchSummary = {
   id: string
   name: string
@@ -597,6 +627,8 @@ export const api = {
   getPaymentProfile: (id: string) => request<PaymentProfile>(`/admin/users/${id}/payment-profile`),
   listApplicants: (filters: { keyword?: string; page?: number; pageSize?: number }) => request<PagedResult<ApplicantOption>>(`/admin/applicants${queryString(filters)}`),
   listPayrollPeriods: () => request<PayrollPeriodSummary[]>('/admin/payroll-periods'),
+  getCostDashboard: (filters: { category?: CostCategory; userId?: string; projectId?: string; groupBy: 'person' | 'project'; page: number; pageSize: number }) => request<CostDashboardResult>(`/admin/cost-dashboard${queryString(filters)}`),
+  getCostDashboardOptions: () => request<{ users: CostDashboardOption[]; projects: CostDashboardOption[] }>('/admin/cost-dashboard/options'),
   createPayrollPeriod: (payrollMonth: string) => request<PayrollPeriodDetail>('/admin/payroll-periods', { method: 'POST', body: JSON.stringify({ payrollMonth }) }),
   getPayrollPeriod: (id: string) => request<PayrollPeriodDetail>(`/admin/payroll-periods/${id}`),
   listPayrollCandidates: (id: string, keyword?: string) => request<PayrollCandidate[]>(`/admin/payroll-periods/${id}/candidates${queryString({ keyword })}`),
