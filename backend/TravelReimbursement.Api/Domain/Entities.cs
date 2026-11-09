@@ -287,6 +287,8 @@ public sealed class PayrollPeriod
 
 public sealed class PayrollEntry
 {
+    public Guid? ProjectId { get; set; }
+    public Project? Project { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid PayrollPeriodId { get; set; }
     public PayrollPeriod PayrollPeriod { get; set; } = null!;

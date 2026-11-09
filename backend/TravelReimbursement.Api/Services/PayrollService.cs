@@ -125,7 +125,10 @@ public sealed record PayrollEntryRow(
     PayoutStatus PayoutStatus,
     DateTimeOffset? PaidAt,
     Guid ConcurrencyToken,
-    PayrollPayoutReceiptRow? PayoutRecord);
+    PayrollPayoutReceiptRow? PayoutRecord,
+    Guid? ProjectId,
+    string? ProjectName,
+    string? ProjectCode);
 
 public sealed record PayrollPeriodDetail(PayrollPeriodSummary Period, IReadOnlyList<PayrollEntryRow> Entries);
 
@@ -171,6 +174,7 @@ public sealed class PayrollService(AppDbContext db, IBankCardProtector bankCardP
     public async Task<PayrollPeriodDetail> GetPeriodAsync(Guid periodId, CancellationToken cancellationToken)
     {
         var period = await db.PayrollPeriods.AsNoTracking()
+            .Include(x => x.Entries).ThenInclude(x => x.Project)
             .Include(x => x.Entries).ThenInclude(x => x.PayoutRecord)
             .SingleOrDefaultAsync(x => x.Id == periodId, cancellationToken)
             ?? throw NotFound();
@@ -271,11 +275,16 @@ public sealed class PayrollService(AppDbContext db, IBankCardProtector bankCardP
         var period = await LoadPeriodAsync(periodId, cancellationToken);
         EnsurePeriodExpected(period, request.PeriodConcurrencyToken);
         EnsureDraft(period);
+        var selectedIds = request.Entries.Where(x => x.ProjectId.HasValue).Select(x => x.ProjectId!.Value).Distinct().ToList();
+        var projects = await db.Projects.Where(x => selectedIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken);
         var changes = new List<object>();
         foreach (var input in request.Entries)
         {
             var entry = period.Entries.SingleOrDefault(x => x.Id == input.Id) ?? throw EntryNotFound();
             EnsureEntryExpected(entry, input.EntryConcurrencyToken);
+            if (input.ProjectId.HasValue && (!projects.TryGetValue(input.ProjectId.Value, out var project)
+                || (!project.IsActive && entry.ProjectId != input.ProjectId)))
+                throw Validation("projectId", "请选择有效的启用项目。");
             var calculation = PayrollCalculator.Calculate(input);
             var before = AmountSnapshot(entry);
             Apply(entry, input, calculation, administratorId);
@@ -301,6 +310,8 @@ public sealed class PayrollService(AppDbContext db, IBankCardProtector bankCardP
             try
             {
                 var calculation = PayrollCalculator.Calculate(entry);
+                if (entry.ProjectId is null || entry.Project is not { IsActive: true })
+                    throw Validation("projectId", "请选择启用的出资项目。");
                 var recipient = GetRecipient(entry.User);
                 entry.GrossPay = calculation.GrossPay;
                 entry.TotalDeductions = calculation.TotalDeductions;
@@ -315,7 +326,7 @@ public sealed class PayrollService(AppDbContext db, IBankCardProtector bankCardP
             }
         }
         if (errors.Count > 0)
-            throw new ApiProblemException(StatusCodes.Status409Conflict, "PAYROLL_LOCK_BLOCKED", "部分人员收款资料不完整，工资表未锁定。", errors);
+            throw new ApiProblemException(StatusCodes.Status409Conflict, "PAYROLL_LOCK_BLOCKED", "部分人员项目、金额或收款资料不符合要求，工资表未锁定。", errors);
         var now = DateTimeOffset.UtcNow;
         foreach (var entry in period.Entries)
         {
@@ -449,6 +460,7 @@ public sealed class PayrollService(AppDbContext db, IBankCardProtector bankCardP
 
     private async Task<PayrollPeriod> LoadPeriodAsync(Guid periodId, CancellationToken cancellationToken) =>
         await db.PayrollPeriods.Include(x => x.Entries).ThenInclude(x => x.User)
+            .Include(x => x.Entries).ThenInclude(x => x.Project)
             .Include(x => x.Entries).ThenInclude(x => x.PayoutRecord)
             .SingleOrDefaultAsync(x => x.Id == periodId, cancellationToken) ?? throw NotFound();
 
@@ -464,7 +476,8 @@ public sealed class PayrollService(AppDbContext db, IBankCardProtector bankCardP
                 entry.GrossPay, entry.TotalDeductions, entry.NetPay, entry.Note, entry.PayoutStatus, entry.PaidAt, entry.ConcurrencyToken,
                 entry.PayoutRecord is null ? null : new PayrollPayoutReceiptRow(entry.PayoutRecord.Amount, entry.PayoutRecord.RecipientName,
                     entry.PayoutRecord.BankCardLastFour, entry.PayoutRecord.ConfirmedById,
-                    actorNames.GetValueOrDefault(entry.PayoutRecord.ConfirmedById), entry.PayoutRecord.ConfirmedAt, entry.PayoutRecord.Note)))
+                    actorNames.GetValueOrDefault(entry.PayoutRecord.ConfirmedById), entry.PayoutRecord.ConfirmedAt, entry.PayoutRecord.Note),
+                entry.ProjectId, entry.Project != null ? entry.Project.Name : null, entry.Project != null ? entry.Project.Code : null))
             .ToList();
         return new PayrollPeriodDetail(ToSummary(period), entries);
     }
@@ -489,6 +502,7 @@ public sealed class PayrollService(AppDbContext db, IBankCardProtector bankCardP
 
     private static void Apply(PayrollEntry entry, SavePayrollEntryRequest input, PayrollCalculation calculation, Guid actorId)
     {
+        entry.ProjectId = input.ProjectId;
         entry.BaseSalary = input.BaseSalary;
         entry.PerformanceSalary = input.PerformanceSalary;
         entry.Bonus = input.Bonus;
@@ -509,6 +523,7 @@ public sealed class PayrollService(AppDbContext db, IBankCardProtector bankCardP
 
     private static object AmountSnapshot(PayrollEntry entry) => new
     {
+        entry.ProjectId,
         entry.BaseSalary,
         entry.PerformanceSalary,
         entry.Bonus,

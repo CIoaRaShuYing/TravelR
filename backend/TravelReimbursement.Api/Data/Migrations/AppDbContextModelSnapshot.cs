@@ -965,6 +965,9 @@ namespace TravelReimbursement.Api.Data.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("SocialSecurityDeduction")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
@@ -983,6 +986,8 @@ namespace TravelReimbursement.Api.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
 
                     b.HasIndex("UpdatedById");
 
@@ -1657,6 +1662,11 @@ namespace TravelReimbursement.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("TravelReimbursement.Api.Domain.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("TravelReimbursement.Api.Domain.AppUser", "UpdatedBy")
                         .WithMany()
                         .HasForeignKey("UpdatedById")
@@ -1670,6 +1680,8 @@ namespace TravelReimbursement.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("PayrollPeriod");
+
+                    b.Navigation("Project");
 
                     b.Navigation("UpdatedBy");
 

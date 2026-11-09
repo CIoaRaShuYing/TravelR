@@ -209,6 +209,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         });
         builder.Entity<PayrollEntry>(entity =>
         {
+            entity.HasIndex(x => x.ProjectId);
+            entity.HasOne(x => x.Project).WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable(table =>
             {
                 table.HasCheckConstraint("CK_PayrollEntries_Amounts", "\"BaseSalary\" >= 0 AND \"PerformanceSalary\" >= 0 AND \"Bonus\" >= 0 AND \"Allowance\" >= 0 AND \"OtherIncrease\" >= 0 AND \"SocialSecurityDeduction\" >= 0 AND \"HousingFundDeduction\" >= 0 AND \"IndividualIncomeTax\" >= 0 AND \"OtherDeduction\" >= 0 AND \"GrossPay\" >= 0 AND \"TotalDeductions\" >= 0 AND \"NetPay\" >= 0");

@@ -2,9 +2,10 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Download, Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { api, type ApiProblem, type PayrollCandidate, type PayrollEntry, type PayrollEntryInput, type PayrollPeriodDetail, type PayrollPeriodStatus, type PayoutStatus } from '../api'
+import { api, type ApiProblem, type Project, type PayrollCandidate, type PayrollEntry, type PayrollEntryInput, type PayrollPeriodDetail, type PayrollPeriodStatus, type PayoutStatus } from '../api'
 
 const loading = ref(false)
+const projects = ref<Project[]>([])
 const periods = ref<PayrollPeriodDetail['period'][]>([])
 const selectedPeriodId = ref('')
 const detail = ref<PayrollPeriodDetail | null>(null)
@@ -47,7 +48,7 @@ function gross(row: PayrollEntry) { return row.baseSalary + row.performanceSalar
 function deductions(row: PayrollEntry) { return row.socialSecurityDeduction + row.housingFundDeduction + row.individualIncomeTax + row.otherDeduction }
 function net(row: PayrollEntry) { return gross(row) - deductions(row) }
 function editableSnapshot(row: PayrollEntry) {
-  return JSON.stringify([row.baseSalary, row.performanceSalary, row.bonus, row.allowance, row.otherIncrease, row.socialSecurityDeduction, row.housingFundDeduction, row.individualIncomeTax, row.otherDeduction, row.note ?? ''])
+  return JSON.stringify([row.projectId, row.baseSalary, row.performanceSalary, row.bonus, row.allowance, row.otherIncrease, row.socialSecurityDeduction, row.housingFundDeduction, row.individualIncomeTax, row.otherDeduction, row.note ?? ''])
 }
 function setDetail(value: PayrollPeriodDetail) {
   detail.value = { period: { ...value.period }, entries: value.entries.map(row => ({ ...row, payoutRecord: row.payoutRecord ? { ...row.payoutRecord } : null })) }
@@ -125,7 +126,7 @@ async function removeEntry(row: PayrollEntry) {
   finally { loading.value = false }
 }
 function toInput(row: PayrollEntry): PayrollEntryInput {
-  return { id: row.id, entryConcurrencyToken: row.concurrencyToken, baseSalary: row.baseSalary, performanceSalary: row.performanceSalary, bonus: row.bonus, allowance: row.allowance, otherIncrease: row.otherIncrease, socialSecurityDeduction: row.socialSecurityDeduction, housingFundDeduction: row.housingFundDeduction, individualIncomeTax: row.individualIncomeTax, otherDeduction: row.otherDeduction, note: row.note }
+  return { id: row.id, projectId: row.projectId || null, entryConcurrencyToken: row.concurrencyToken, baseSalary: row.baseSalary, performanceSalary: row.performanceSalary, bonus: row.bonus, allowance: row.allowance, otherIncrease: row.otherIncrease, socialSecurityDeduction: row.socialSecurityDeduction, housingFundDeduction: row.housingFundDeduction, individualIncomeTax: row.individualIncomeTax, otherDeduction: row.otherDeduction, note: row.note }
 }
 async function saveRows() {
   if (!period.value || !dirtyRows.value.length) return ElMessage.info('没有需要保存的修改。')
@@ -193,7 +194,7 @@ function openEdit(row: PayrollEntry) { editDialog.row = row; editDialog.visible 
 
 onMounted(async () => {
   loading.value = true
-  try { await loadPeriods() }
+  try { projects.value = await api.listAvailableProjects(); await loadPeriods() }
   catch (error) { ElMessage.error(api.message(error, '加载工资月份失败。')) }
   finally { loading.value = false }
 })
@@ -230,6 +231,7 @@ onMounted(async () => {
       <div class="table-shell payroll-table desktop-table" v-loading="loading">
         <el-table :data="filteredRows" row-key="id" empty-text="当前没有工资明细。">
           <el-table-column label="员工" fixed width="150"><template #default="scope"><div class="primary-cell"><strong>{{ employeeName(scope.row) }}</strong><span>{{ scope.row.employeeDisplayNameSnapshot }}</span></div></template></el-table-column>
+          <el-table-column label="项目" width="220"><template #default="scope"><template v-if="isDraft"><el-select v-model="scope.row.projectId" filterable clearable placeholder="选择出资项目" style="width:100%"><el-option v-if="scope.row.projectId && !projects.some(item => item.id === scope.row.projectId)" :label="`${scope.row.projectCode} · ${scope.row.projectName}（已停用）`" :value="scope.row.projectId" disabled /><el-option v-for="item in projects" :key="item.id" :label="`${item.code} · ${item.name}`" :value="item.id" /></el-select></template><span v-else>{{ scope.row.projectName ? `${scope.row.projectCode} · ${scope.row.projectName}` : '未分配项目' }}</span></template></el-table-column>
           <el-table-column label="收入项">
             <el-table-column v-for="field in [{key:'baseSalary',label:'基本工资'},{key:'performanceSalary',label:'绩效工资'},{key:'bonus',label:'奖金'},{key:'allowance',label:'津贴'},{key:'otherIncrease',label:'其他增加'}]" :key="field.key" :label="field.label" width="138">
               <template #default="scope"><el-input-number v-if="isDraft" v-model="scope.row[field.key]" :min="0" :precision="2" :controls="false" /><span v-else>{{ money(scope.row[field.key]) }}</span></template>
@@ -251,6 +253,7 @@ onMounted(async () => {
       <div class="mobile-list" v-loading="loading">
         <article v-for="row in filteredRows" :key="row.id" class="mobile-record payroll-mobile-card">
           <div class="mobile-record__head"><div><strong>{{ employeeName(row) }}</strong><span>{{ row.employeeDisplayNameSnapshot }}</span></div><el-tag :type="payoutType(row.payoutStatus)" effect="plain">{{ payoutLabel(row.payoutStatus) }}</el-tag></div>
+          <p>项目：{{ projects.find(item => item.id === row.projectId)?.name || row.projectName || '未分配项目' }}</p>
           <dl><div><dt>应发</dt><dd>{{ money(gross(row)) }}</dd></div><div><dt>扣款</dt><dd>{{ money(deductions(row)) }}</dd></div><div><dt>实发</dt><dd><strong>{{ money(net(row)) }}</strong></dd></div></dl>
           <div class="mobile-record__actions"><el-button v-if="isDraft" @click="openEdit(row)">编辑工资</el-button><el-button v-if="row.payoutStatus === 'Pending'" type="primary" @click="openPayout(row)">确认已发放</el-button><el-button v-if="isDraft" type="danger" plain @click="removeEntry(row)">移除</el-button></div>
         </article>
@@ -264,7 +267,7 @@ onMounted(async () => {
     <el-dialog v-model="addDialog.visible" title="添加工资人员" width="min(620px, calc(100vw - 32px))"><div class="payroll-candidate-toolbar"><el-input v-model="addDialog.keyword" clearable placeholder="搜索正式用户" @keyup.enter="loadCandidates" /><el-button @click="loadCandidates">搜索</el-button></div><el-checkbox-group v-model="addDialog.selected" class="payroll-candidates" v-loading="addDialog.loading"><el-checkbox v-for="candidate in addDialog.candidates" :key="candidate.id" :value="candidate.id"><span>{{ candidate.personalName || candidate.displayName }}</span><small>{{ candidate.isActive ? '启用' : '停用' }} · 姓名{{ candidate.personalNameReady ? '已填' : '缺失' }} · 银行卡{{ candidate.bankCardReady ? '已填' : '缺失' }}</small></el-checkbox></el-checkbox-group><el-empty v-if="!addDialog.loading && !addDialog.candidates.length" description="没有可添加的正式用户" /><template #footer><el-button @click="addDialog.visible = false">取消</el-button><el-button type="primary" :loading="addDialog.loading" @click="addEntries">添加</el-button></template></el-dialog>
 
     <el-dialog v-model="editDialog.visible" title="编辑工资" width="min(620px, calc(100vw - 16px))" class="payroll-editor-dialog">
-      <template v-if="editDialog.row"><div class="dialog-subject"><strong>{{ employeeName(editDialog.row) }}</strong><span>{{ monthLabel(period!.payrollMonth) }}</span></div><div class="payroll-editor-grid"><el-form-item v-for="field in [{key:'baseSalary',label:'基本工资'},{key:'performanceSalary',label:'绩效工资'},{key:'bonus',label:'奖金'},{key:'allowance',label:'津贴'},{key:'otherIncrease',label:'其他增加'},{key:'socialSecurityDeduction',label:'社保个人扣款'},{key:'housingFundDeduction',label:'公积金个人扣款'},{key:'individualIncomeTax',label:'个人所得税'},{key:'otherDeduction',label:'其他扣款'}]" :key="field.key" :label="field.label"><el-input-number v-model="editDialog.row[field.key]" :min="0" :precision="2" :controls="false" /></el-form-item></div><div class="payroll-editor-result"><span>应发 {{ money(gross(editDialog.row)) }}</span><span>扣款 {{ money(deductions(editDialog.row)) }}</span><strong>实发 {{ money(net(editDialog.row)) }}</strong></div><el-form-item label="备注（其他增加或其他扣款不为 0 时必填）"><el-input v-model="editDialog.row.note" type="textarea" :rows="3" maxlength="1000" show-word-limit /></el-form-item></template>
+      <template v-if="editDialog.row"><div class="dialog-subject"><strong>{{ employeeName(editDialog.row) }}</strong><span>{{ monthLabel(period!.payrollMonth) }}</span></div><el-form-item label="出资项目"><el-select v-model="editDialog.row.projectId" filterable clearable placeholder="选择出资项目" style="width:100%"><el-option v-if="editDialog.row.projectId && !projects.some(item => item.id === editDialog.row?.projectId)" :label="`${editDialog.row.projectCode} · ${editDialog.row.projectName}（已停用）`" :value="editDialog.row.projectId" disabled /><el-option v-for="item in projects" :key="item.id" :label="`${item.code} · ${item.name}`" :value="item.id" /></el-select></el-form-item><div class="payroll-editor-grid"><el-form-item v-for="field in [{key:'baseSalary',label:'基本工资'},{key:'performanceSalary',label:'绩效工资'},{key:'bonus',label:'奖金'},{key:'allowance',label:'津贴'},{key:'otherIncrease',label:'其他增加'},{key:'socialSecurityDeduction',label:'社保个人扣款'},{key:'housingFundDeduction',label:'公积金个人扣款'},{key:'individualIncomeTax',label:'个人所得税'},{key:'otherDeduction',label:'其他扣款'}]" :key="field.key" :label="field.label"><el-input-number v-model="editDialog.row[field.key]" :min="0" :precision="2" :controls="false" /></el-form-item></div><div class="payroll-editor-result"><span>应发 {{ money(gross(editDialog.row)) }}</span><span>扣款 {{ money(deductions(editDialog.row)) }}</span><strong>实发 {{ money(net(editDialog.row)) }}</strong></div><el-form-item label="备注（其他增加或其他扣款不为 0 时必填）"><el-input v-model="editDialog.row.note" type="textarea" :rows="3" maxlength="1000" show-word-limit /></el-form-item></template>
       <template #footer><el-button @click="editDialog.visible = false">暂不保存</el-button><el-button type="primary" :loading="loading" @click="saveRows">保存修改</el-button></template>
     </el-dialog>
 

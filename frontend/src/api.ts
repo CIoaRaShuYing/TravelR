@@ -50,6 +50,9 @@ export type PayrollPayoutReceipt = {
 }
 
 export type PayrollEntry = {
+  projectId: string | null
+  projectName: string | null
+  projectCode: string | null
   id: string
   userId: string
   employeeDisplayNameSnapshot: string
@@ -87,7 +90,7 @@ export type PayrollCandidate = {
 }
 
 export type PayrollEntryInput = Pick<PayrollEntry,
-  'id' | 'baseSalary' | 'performanceSalary' | 'bonus' | 'allowance' | 'otherIncrease' |
+  'id' | 'projectId' | 'baseSalary' | 'performanceSalary' | 'bonus' | 'allowance' | 'otherIncrease' |
   'socialSecurityDeduction' | 'housingFundDeduction' | 'individualIncomeTax' | 'otherDeduction' | 'note'> & {
     entryConcurrencyToken: string
   }
@@ -627,7 +630,7 @@ export const api = {
   getPaymentProfile: (id: string) => request<PaymentProfile>(`/admin/users/${id}/payment-profile`),
   listApplicants: (filters: { keyword?: string; page?: number; pageSize?: number }) => request<PagedResult<ApplicantOption>>(`/admin/applicants${queryString(filters)}`),
   listPayrollPeriods: () => request<PayrollPeriodSummary[]>('/admin/payroll-periods'),
-  getCostDashboard: (filters: { category?: CostCategory; userId?: string; projectId?: string; groupBy: 'person' | 'project'; page: number; pageSize: number }) => request<CostDashboardResult>(`/admin/cost-dashboard${queryString(filters)}`),
+  getCostDashboard: (filters: { fromMonth?: string; toMonth?: string; category?: CostCategory; userId?: string; projectId?: string; groupBy: 'person' | 'project'; page: number; pageSize: number }) => request<CostDashboardResult>(`/admin/cost-dashboard${queryString(filters)}`),
   getCostDashboardOptions: () => request<{ users: CostDashboardOption[]; projects: CostDashboardOption[] }>('/admin/cost-dashboard/options'),
   createPayrollPeriod: (payrollMonth: string) => request<PayrollPeriodDetail>('/admin/payroll-periods', { method: 'POST', body: JSON.stringify({ payrollMonth }) }),
   getPayrollPeriod: (id: string) => request<PayrollPeriodDetail>(`/admin/payroll-periods/${id}`),

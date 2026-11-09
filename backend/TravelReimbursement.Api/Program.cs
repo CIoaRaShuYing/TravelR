@@ -532,11 +532,11 @@ secured.MapPut("/meeting-records/{id:guid}", async (
 
 var admin = secured.MapGroup("/admin").RequireAuthorization(new AuthorizeAttribute { Roles = "Administrator" });
 
-admin.MapGet("/cost-dashboard", async (CostCategory? category, Guid? userId, Guid? projectId, string? groupBy,
+admin.MapGet("/cost-dashboard", async (CostCategory? category, Guid? userId, Guid? projectId, string? groupBy, DateOnly? fromMonth, DateOnly? toMonth,
     int? page, int? pageSize, CostDashboardService service, HttpContext context, CancellationToken cancellationToken) =>
 {
     context.Response.Headers.CacheControl = "no-store, private";
-    return Results.Ok(await service.GetAsync(category, userId, projectId, groupBy, page, pageSize, cancellationToken));
+    return Results.Ok(await service.GetAsync(category, userId, projectId, groupBy, page, pageSize, cancellationToken, fromMonth, toMonth));
 });
 
 admin.MapGet("/cost-dashboard/options", async (CostDashboardService service, HttpContext context, CancellationToken cancellationToken) =>

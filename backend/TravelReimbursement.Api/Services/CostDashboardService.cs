@@ -45,8 +45,21 @@ public sealed record CostDashboardResult(
 
 internal static class CostDashboardQuery
 {
-    public static IQueryable<CostDashboardItem> Build(IQueryable<PayrollEntry> payroll, IQueryable<ReimbursementClaim> claims)
+    public static IQueryable<CostDashboardItem> Build(IQueryable<PayrollEntry> payroll, IQueryable<ReimbursementClaim> claims,
+        DateOnly? fromMonth = null, DateOnly? toMonth = null)
     {
+        if (fromMonth.HasValue)
+        {
+            payroll = payroll.Where(entry => entry.PayrollPeriod.PayrollMonth >= fromMonth.Value);
+            var start = new DateTimeOffset(fromMonth.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(8)).ToUniversalTime();
+            claims = claims.Where(claim => claim.SubmittedAt >= start);
+        }
+        if (toMonth.HasValue)
+        {
+            payroll = payroll.Where(entry => entry.PayrollPeriod.PayrollMonth <= toMonth.Value);
+            var end = new DateTimeOffset(toMonth.Value.AddMonths(1).ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(8)).ToUniversalTime();
+            claims = claims.Where(claim => claim.SubmittedAt < end);
+        }
         var salaries = payroll
             .Where(entry => (entry.PayrollPeriod.Status == PayrollPeriodStatus.ReadyForPayout
                     || entry.PayrollPeriod.Status == PayrollPeriodStatus.Completed)
@@ -58,9 +71,9 @@ internal static class CostDashboardQuery
                 UserId = entry.UserId,
                 UserName = entry.User.PersonalName != null && entry.User.PersonalName != "" ? entry.User.PersonalName : entry.User.DisplayName,
                 UserDisplayName = entry.User.DisplayName,
-                ProjectId = null,
-                ProjectName = null,
-                ProjectCode = null,
+                ProjectId = entry.ProjectId,
+                ProjectName = entry.Project != null ? entry.Project.Name : null,
+                ProjectCode = entry.Project != null ? entry.Project.Code : null,
                 SourceId = entry.PayrollPeriodId,
                 ClaimNumber = null,
                 PayrollMonth = entry.PayrollPeriod.PayrollMonth,
@@ -146,19 +159,20 @@ internal static class CostDashboardQuery
 
 public sealed class CostDashboardService(AppDbContext db)
 {
-    private IQueryable<CostDashboardItem> Query() => CostDashboardQuery.Build(
-        db.PayrollEntries.AsNoTracking(), db.ReimbursementClaims.AsNoTracking());
+    private IQueryable<CostDashboardItem> Query(DateOnly? fromMonth = null, DateOnly? toMonth = null) => CostDashboardQuery.Build(
+        db.PayrollEntries.AsNoTracking(), db.ReimbursementClaims.AsNoTracking(), fromMonth, toMonth);
 
     public async Task<CostDashboardResult> GetAsync(
         CostCategory? category, Guid? userId, Guid? projectId, string? groupBy, int? page, int? pageSize,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, DateOnly? fromMonth = null, DateOnly? toMonth = null)
     {
         if (category.HasValue && !Enum.IsDefined(category.Value))
             throw Validation("category", "费用类别必须是 Payroll、Reimbursement 或 MealAllowance。");
         if (groupBy is not null && groupBy != "person" && groupBy != "project")
             throw Validation("groupBy", "划分方式必须是 person 或 project。");
+        ValidateMonths(fromMonth, toMonth);
         var byProject = groupBy == "project";
-        var query = CostDashboardQuery.Filter(Query(), category, userId, projectId, byProject);
+        var query = CostDashboardQuery.Filter(Query(fromMonth, toMonth), category, userId, projectId, byProject);
         var groups = await CostDashboardQuery.Group(query, byProject).ToListAsync(cancellationToken);
         groups = groups.OrderByDescending(group => group.Totals.TotalAmount).ThenBy(group => group.Id).ToList();
         var total = groups.Sum(group => group.ItemCount);
@@ -168,7 +182,7 @@ public sealed class CostDashboardService(AppDbContext db)
             .ThenBy(item => item.Category).ThenBy(item => item.Id)
             .Skip((currentPage - 1) * size).Take(size).ToListAsync(cancellationToken);
         return new CostDashboardResult(CostDashboardQuery.Summarize(groups), groups, items, total, currentPage, size,
-            byProject || projectId.HasValue);
+            false);
     }
 
     public async Task<CostDashboardOptions> GetOptionsAsync(CancellationToken cancellationToken)
@@ -182,6 +196,16 @@ public sealed class CostDashboardService(AppDbContext db)
             .OrderBy(item => item.ProjectCode).ThenBy(item => item.ProjectId)
             .Select(item => new CostDashboardOption(item.ProjectId!.Value, item.ProjectName!, item.ProjectCode!)).ToListAsync(cancellationToken);
         return new CostDashboardOptions(users, projects);
+    }
+
+    internal static void ValidateMonths(DateOnly? fromMonth, DateOnly? toMonth)
+    {
+        if ((fromMonth.HasValue && fromMonth.Value.Day != 1) || (toMonth.HasValue && toMonth.Value.Day != 1))
+            throw Validation("month", "时间筛选必须使用月份第一天。");
+        if (fromMonth.HasValue && toMonth.HasValue && fromMonth > toMonth)
+            throw Validation("month", "开始月份不能晚于结束月份。");
+        if (toMonth == new DateOnly(9999, 12, 1))
+            throw Validation("toMonth", "结束月份超出支持范围。");
     }
 
     private static ApiProblemException Validation(string field, string message) => new(

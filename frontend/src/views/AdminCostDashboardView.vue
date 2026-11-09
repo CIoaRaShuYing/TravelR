@@ -6,6 +6,7 @@ import { api, type CostCategory, type CostDashboardGroup, type CostDashboardItem
 import ClaimDetailDrawer from '../components/ClaimDetailDrawer.vue'
 
 const loading = ref(false)
+const months = ref<[string, string] | null>(null)
 const errorMessage = ref('')
 const result = ref<CostDashboardResult | null>(null)
 const users = ref<CostDashboardOption[]>([])
@@ -23,9 +24,7 @@ const categoryColumns: Array<{ category: CostCategory; label: string; paid: keyo
   { category: 'Reimbursement', label: '报销', paid: 'reimbursementPaid', pending: 'reimbursementPending', total: 'reimbursementTotal' },
   { category: 'MealAllowance', label: '餐补', paid: 'mealAllowancePaid', pending: 'mealAllowancePending', total: 'mealAllowanceTotal' },
 ]
-const payrollExcluded = computed(() => filters.groupBy === 'project' || !!filters.projectId)
-const visibleColumns = computed(() => categoryColumns.filter(column => (!payrollExcluded.value || column.category !== 'Payroll')
-  && (!filters.category || column.category === filters.category)))
+const visibleColumns = computed(() => categoryColumns.filter(column => !filters.category || column.category === filters.category))
 const categoryLabels: Record<CostCategory, string> = { Payroll: '工资', Reimbursement: '报销', MealAllowance: '餐补' }
 const incomeFields: Array<{ key: keyof PayrollEntry; label: string }> = [
   { key: 'baseSalary', label: '基本工资' }, { key: 'performanceSalary', label: '绩效工资' },
@@ -48,6 +47,7 @@ async function load() {
   try {
     const response = await api.getCostDashboard({
       category: filters.category || undefined, userId: filters.userId || undefined, projectId: filters.projectId || undefined,
+      fromMonth: months.value?.[0] ? `${months.value[0]}-01` : undefined, toMonth: months.value?.[1] ? `${months.value[1]}-01` : undefined,
       groupBy: filters.groupBy, page: filters.page, pageSize: filters.pageSize,
     })
     if (version !== loadVersion) return
@@ -77,15 +77,8 @@ async function loadOptions() {
 }
 
 function applyFilters() { filters.page = 1; void load() }
-function changeCategory() {
-  if (filters.category === 'Payroll') { filters.projectId = ''; filters.groupBy = 'person' }
-  applyFilters()
-}
-function changeGroup() {
-  if (filters.groupBy === 'project' && filters.category === 'Payroll') filters.category = ''
-  applyFilters()
-}
 function clearFilters() {
+  months.value = null
   Object.assign(filters, { category: '', userId: '', projectId: '', groupBy: 'person', page: 1 })
   void load()
 }
@@ -124,23 +117,24 @@ onMounted(refresh)
     </header>
 
     <div class="cost-filters">
-      <label><span>费用类别</span><el-select v-model="filters.category" placeholder="全部费用" aria-label="费用类别" @change="changeCategory"><el-option label="全部费用" value="" /><el-option v-for="column in categoryColumns" :key="column.category" :label="column.label" :value="column.category" /></el-select></label>
+      <label><span>费用类别</span><el-select v-model="filters.category" placeholder="全部费用" aria-label="费用类别" @change="applyFilters"><el-option label="全部费用" value="" /><el-option v-for="column in categoryColumns" :key="column.category" :label="column.label" :value="column.category" /></el-select></label>
       <label><span>人员</span><el-select v-model="filters.userId" clearable filterable placeholder="全部人员" aria-label="人员" @change="applyFilters"><el-option v-for="user in users" :key="user.id" :label="optionLabel(user)" :value="user.id" /></el-select></label>
-      <label><span>项目</span><el-select v-model="filters.projectId" clearable filterable :disabled="filters.category === 'Payroll'" :placeholder="filters.category === 'Payroll' ? '工资不按项目统计' : '全部项目'" aria-label="项目" @change="applyFilters"><el-option v-for="project in projects" :key="project.id" :label="`${project.description} · ${project.name}`" :value="project.id" /></el-select></label>
+      <label><span>项目</span><el-select v-model="filters.projectId" clearable filterable placeholder="全部项目" aria-label="项目" @change="applyFilters"><el-option v-for="project in projects" :key="project.id" :label="`${project.description} · ${project.name}`" :value="project.id" /></el-select></label>
+      <label class="cost-months"><span>时间范围</span><el-date-picker v-model="months" type="monthrange" value-format="YYYY-MM" start-placeholder="开始月份" end-placeholder="结束月份" range-separator="至" aria-label="费用月份范围" @change="applyFilters" /></label>
       <el-button @click="clearFilters">重置筛选</el-button>
     </div>
-    <div class="cost-scope"><span>统计口径</span><p>{{ payrollExcluded ? '当前为项目范围，仅统计报销和餐补。' : '工资取已锁定或已完成工资表的实发金额；报销、餐补取已批准金额。' }} 总额 = 已发放 + 待发放，包含已归档费用。</p></div>
+    <div class="cost-scope"><span>统计口径</span><p>工资取已锁定或已完成工资表的实发金额；报销、餐补取已批准金额。时间按工资所属月、报销及餐补的报销提交月（中国时区）筛选，包含起止月份。 总额 = 已发放 + 待发放，包含已归档费用。</p></div>
 
     <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon><el-button text @click="refresh">重新加载</el-button></el-alert>
     <div v-loading="loading" :aria-busy="loading" class="cost-content">
       <template v-if="result">
         <div class="cost-totals" aria-label="费用汇总">
-          <article class="cost-total cost-total--all"><span>{{ payrollExcluded ? '项目费用合计' : '总费用' }}</span><strong>{{ money(result.summary.totalAmount) }}</strong><dl><div><dt>已发放</dt><dd>{{ money(result.summary.paidAmount) }}</dd></div><div><dt>待发放</dt><dd>{{ money(result.summary.pendingAmount) }}</dd></div></dl></article>
+          <article class="cost-total cost-total--all"><span>总费用</span><strong>{{ money(result.summary.totalAmount) }}</strong><dl><div><dt>已发放</dt><dd>{{ money(result.summary.paidAmount) }}</dd></div><div><dt>待发放</dt><dd>{{ money(result.summary.pendingAmount) }}</dd></div></dl></article>
           <article v-for="column in visibleColumns" :key="column.category" class="cost-total"><span>{{ column.label }}</span><strong>{{ money(result.summary[column.total]) }}</strong><dl><div><dt>已发放</dt><dd>{{ money(result.summary[column.paid]) }}</dd></div><div><dt>待发放</dt><dd>{{ money(result.summary[column.pending]) }}</dd></div></dl></article>
         </div>
 
         <section aria-label="费用分组统计">
-          <div class="cost-section-heading"><div><h2>费用分布</h2><p>{{ result.groups.length }} 个{{ filters.groupBy === 'person' ? '人员' : '项目' }} · 点击名称查看对应费用</p></div><el-radio-group v-model="filters.groupBy" aria-label="划分方式" @change="changeGroup"><el-radio-button value="person">按人员</el-radio-button><el-radio-button value="project">按项目</el-radio-button></el-radio-group></div>
+          <div class="cost-section-heading"><div><h2>费用分布</h2><p>{{ result.groups.length }} 个{{ filters.groupBy === 'person' ? '人员' : '项目' }} · 点击名称查看对应费用</p></div><el-radio-group v-model="filters.groupBy" aria-label="划分方式" @change="applyFilters"><el-radio-button value="person">按人员</el-radio-button><el-radio-button value="project">按项目</el-radio-button></el-radio-group></div>
           <div class="table-shell desktop-table"><el-table :data="result.groups" row-key="id" max-height="440" empty-text="当前条件下没有已发放或待发放费用。">
             <el-table-column :label="filters.groupBy === 'person' ? '人员' : '项目'" min-width="160" fixed><template #default="{ row }"><div class="primary-cell"><el-button link type="primary" @click="selectGroup(row)">{{ row.name }}</el-button><span>{{ row.description !== row.name ? row.description : row.id.slice(0, 8) }}</span></div></template></el-table-column>
             <el-table-column v-for="column in visibleColumns" :key="column.category" :label="column.label" min-width="175" align="right"><template #default="{ row }"><div class="cost-cell"><strong>{{ money(row.totals[column.total]) }}</strong><span>已发 {{ money(row.totals[column.paid]) }}</span><span>待发 {{ money(row.totals[column.pending]) }}</span></div></template></el-table-column>
@@ -157,13 +151,13 @@ onMounted(refresh)
           <div class="table-shell desktop-table"><el-table :data="result.items" empty-text="当前条件下没有费用明细。">
             <el-table-column label="类别" width="90"><template #default="{ row }"><el-tag effect="plain">{{ categoryLabels[row.category as CostCategory] }}</el-tag></template></el-table-column>
             <el-table-column label="人员" min-width="140"><template #default="{ row }"><div class="primary-cell"><strong>{{ row.userName }}</strong><span>{{ row.userDisplayName }}</span></div></template></el-table-column>
-            <el-table-column label="项目" min-width="170"><template #default="{ row }"><div class="primary-cell"><strong>{{ row.projectName || '不按项目统计' }}</strong><span>{{ row.projectCode }}</span></div></template></el-table-column>
+            <el-table-column label="项目" min-width="170"><template #default="{ row }"><div class="primary-cell"><strong>{{ row.projectName || '未分配项目' }}</strong><span>{{ row.projectCode }}</span></div></template></el-table-column>
             <el-table-column label="来源" min-width="180"><template #default="{ row }">{{ sourceLabel(row) }}</template></el-table-column>
             <el-table-column label="金额" min-width="135" align="right"><template #default="{ row }"><strong class="cost-money">{{ money(row.amount) }}</strong></template></el-table-column>
             <el-table-column label="发放状态" width="110"><template #default="{ row }"><el-tag :type="row.payoutStatus === 'Paid' ? 'success' : 'warning'" effect="plain">{{ row.payoutStatus === 'Paid' ? '已发放' : '待发放' }}</el-tag></template></el-table-column>
             <el-table-column label="详情" width="70" fixed="right"><template #default="{ row }"><el-button text circle :icon="View" aria-label="查看费用详情" @click="openDetail(row)" /></template></el-table-column>
           </el-table></div>
-          <div class="mobile-list"><article v-for="row in result.items" :key="`${row.category}-${row.id}`" class="mobile-record cost-detail-card"><header><div><strong>{{ row.userName }} · {{ categoryLabels[row.category] }}</strong><small>{{ sourceLabel(row) }}</small></div><strong class="cost-money">{{ money(row.amount) }}</strong></header><p>{{ row.projectName ? `${row.projectCode} · ${row.projectName}` : '工资不按项目统计' }}</p><footer><el-tag :type="row.payoutStatus === 'Paid' ? 'success' : 'warning'" effect="plain">{{ row.payoutStatus === 'Paid' ? '已发放' : '待发放' }}</el-tag><el-button :icon="View" @click="openDetail(row)">查看详情</el-button></footer></article><el-empty v-if="result.items.length === 0" description="当前条件下没有费用明细" /></div>
+          <div class="mobile-list"><article v-for="row in result.items" :key="`${row.category}-${row.id}`" class="mobile-record cost-detail-card"><header><div><strong>{{ row.userName }} · {{ categoryLabels[row.category] }}</strong><small>{{ sourceLabel(row) }}</small></div><strong class="cost-money">{{ money(row.amount) }}</strong></header><p>{{ row.projectName ? `${row.projectCode} · ${row.projectName}` : '未分配项目' }}</p><footer><el-tag :type="row.payoutStatus === 'Paid' ? 'success' : 'warning'" effect="plain">{{ row.payoutStatus === 'Paid' ? '已发放' : '待发放' }}</el-tag><el-button :icon="View" @click="openDetail(row)">查看详情</el-button></footer></article><el-empty v-if="result.items.length === 0" description="当前条件下没有费用明细" /></div>
           <el-pagination v-if="result.total > filters.pageSize" class="pagination" :current-page="filters.page" :page-size="filters.pageSize" :total="result.total" layout="prev, pager, next" @current-change="changePage" />
         </section>
       </template>
@@ -177,7 +171,9 @@ onMounted(refresh)
 </template>
 
 <style scoped>
-.cost-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; gap: 16px; margin: 24px 0 14px; }
+.cost-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 16px; margin: 24px 0 14px; }
+.cost-months { grid-column: span 2; }
+.cost-months :deep(.el-date-editor) { width: 100%; box-sizing: border-box; }
 .cost-filters label { display: grid; gap: 7px; min-width: 0; }
 .cost-filters label > span { color: var(--muted); font-size: 12px; }
 .cost-scope { display: flex; gap: 12px; align-items: baseline; margin-bottom: 20px; font-size: 12px; line-height: 1.8; }

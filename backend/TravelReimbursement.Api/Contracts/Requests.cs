@@ -105,7 +105,8 @@ public sealed record SavePayrollEntryRequest(
     [property: Range(typeof(decimal), "0", "999999999")] decimal HousingFundDeduction,
     [property: Range(typeof(decimal), "0", "999999999")] decimal IndividualIncomeTax,
     [property: Range(typeof(decimal), "0", "999999999")] decimal OtherDeduction,
-    [property: StringLength(1000)] string? Note);
+    [property: StringLength(1000)] string? Note,
+    Guid? ProjectId = null);
 
 public sealed record SavePayrollEntriesRequest(
     Guid PeriodConcurrencyToken,

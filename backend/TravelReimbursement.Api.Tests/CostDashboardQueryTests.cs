@@ -92,7 +92,7 @@ public sealed class CostDashboardQueryTests
     }
 
     [Fact]
-    public void Project_scope_excludes_all_payroll_and_keeps_person_and_category_filters()
+    public void Project_scope_includes_assigned_payroll_and_keeps_person_and_category_filters()
     {
         var user = User();
         var project = new Project { Name = "项目 A", Code = "A" };
@@ -102,18 +102,21 @@ public sealed class CostDashboardQueryTests
             Claim(user, new Project(), 200m, PayoutStatus.Pending),
             Claim(User(), project, 300m, PayoutStatus.Pending)
         };
-        var query = Query([Salary(user, 8000m)], claims);
+        var salary = Salary(user, 8000m);
+        salary.Project = project;
+        salary.ProjectId = project.Id;
+        var query = Query([salary], claims);
 
         var byProject = CostDashboardQuery.Filter(query, null, user.Id, null, true);
-        Assert.DoesNotContain(byProject, row => row.Category == CostCategory.Payroll);
+        Assert.Single(byProject.Where(row => row.Category == CostCategory.Payroll));
         Assert.Equal(2, CostDashboardQuery.Group(byProject, true).Count());
         var filtered = CostDashboardQuery.Filter(query, CostCategory.MealAllowance, user.Id, project.Id, false);
         var meal = Assert.Single(filtered);
         Assert.Equal(50m, meal.Amount);
         var projectRows = CostDashboardQuery.Filter(query, null, null, project.Id, false).ToList();
-        Assert.Equal(3, projectRows.Count);
-        Assert.DoesNotContain(projectRows, row => row.Category == CostCategory.Payroll);
-        Assert.Empty(CostDashboardQuery.Filter(query, CostCategory.Payroll, null, project.Id, false));
+        Assert.Equal(4, projectRows.Count);
+        Assert.Equal(8000m, Assert.Single(CostDashboardQuery.Filter(query, CostCategory.Payroll, null, project.Id, false)).Amount);
+        Assert.Equal(8350m, CostDashboardQuery.Summarize(CostDashboardQuery.Group(byProject, true).ToList()).TotalAmount);
     }
 
     [Fact]
@@ -154,7 +157,7 @@ public sealed class CostDashboardQueryTests
     {
         using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
             .UseNpgsql("Host=localhost;Database=query_only;Username=query_only;Password=query_only").Options);
-        var query = CostDashboardQuery.Filter(CostDashboardQuery.Build(db.PayrollEntries, db.ReimbursementClaims),
+        var query = CostDashboardQuery.Filter(CostDashboardQuery.Build(db.PayrollEntries, db.ReimbursementClaims, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 1)),
             CostCategory.Reimbursement, Guid.NewGuid(), byProject ? Guid.NewGuid() : null, byProject);
 
         Assert.Contains("GROUP BY", CostDashboardQuery.Group(query, byProject).ToQueryString());
@@ -169,6 +172,49 @@ public sealed class CostDashboardQueryTests
 
     private static IQueryable<CostDashboardItem> Query(IEnumerable<PayrollEntry> payroll, IEnumerable<ReimbursementClaim> claims) =>
         CostDashboardQuery.Build(payroll.AsQueryable(), claims.AsQueryable());
+
+    [Fact]
+    public void Month_range_includes_salary_month_and_china_submission_boundaries_for_both_claim_costs()
+    {
+        var user = User();
+        var project = new Project();
+        var salary = Salary(user, 1000m);
+        var outsideSalary = Salary(user, 9999m);
+        outsideSalary.PayrollPeriod.PayrollMonth = new DateOnly(2026, 8, 1);
+        var boundaries = new[]
+        {
+            DateTimeOffset.Parse("2026-08-31T15:59:59Z"),
+            DateTimeOffset.Parse("2026-08-31T16:00:00Z"),
+            DateTimeOffset.Parse("2026-09-30T15:59:59Z"),
+            DateTimeOffset.Parse("2026-09-30T16:00:00Z")
+        };
+        var claims = boundaries.Select(date =>
+        {
+            var claim = Claim(user, project, 100m, PayoutStatus.Paid, 50m);
+            claim.SubmittedAt = date;
+            return claim;
+        }).ToArray();
+        var query = CostDashboardQuery.Build(new[] { salary, outsideSalary }.AsQueryable(), claims.AsQueryable(),
+            new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 1));
+        Assert.Equal(5, query.Count());
+        var totals = CostDashboardQuery.Summarize(CostDashboardQuery.Group(query, false).ToList());
+        Assert.Equal(1000m, totals.PayrollTotal);
+        Assert.Equal(200m, totals.ReimbursementTotal);
+        Assert.Equal(100m, totals.MealAllowanceTotal);
+        Assert.Equal(10, CostDashboardQuery.Build(new[] { salary, outsideSalary }.AsQueryable(), claims.AsQueryable()).Count());
+        Assert.Empty(CostDashboardQuery.Build(new[] { salary }.AsQueryable(), claims.AsQueryable(), new DateOnly(2027, 1, 1)));
+    }
+
+    [Fact]
+    public void Rejects_reversed_and_non_month_start_ranges_and_accepts_open_ranges()
+    {
+        Assert.Throws<ApiProblemException>(() => CostDashboardService.ValidateMonths(new DateOnly(2026, 10, 1), new DateOnly(2026, 9, 1)));
+        Assert.Throws<ApiProblemException>(() => CostDashboardService.ValidateMonths(new DateOnly(2026, 9, 2), null));
+        Assert.Throws<ApiProblemException>(() => CostDashboardService.ValidateMonths(null, new DateOnly(2026, 9, 2)));
+        CostDashboardService.ValidateMonths(null, null);
+        CostDashboardService.ValidateMonths(new DateOnly(2025, 12, 1), new DateOnly(2026, 1, 1));
+        CostDashboardService.ValidateMonths(null, new DateOnly(2026, 9, 1));
+    }
 
     private static AppUser User() => new() { Id = Guid.NewGuid(), DisplayName = "同名人员", PersonalName = "张三", IsActive = true };
 

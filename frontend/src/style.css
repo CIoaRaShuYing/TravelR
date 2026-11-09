@@ -464,7 +464,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline
 .payroll-actions > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .payroll-actions .filter-cluster > .el-select { width: 170px; }
 .payroll-table { overflow-x: auto; }
-.payroll-table .el-table { min-width: 2180px; }
+.payroll-table .el-table { min-width: 2400px; }
 .payroll-table .el-input-number { width: 116px; }
 .payroll-table .el-input-number .el-input__inner { text-align: right; }
 .payroll-candidate-toolbar { display: flex; gap: 8px; margin-bottom: 14px; }
